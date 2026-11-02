@@ -1,0 +1,18 @@
+{
+	"name": "Lge.PhysicsBackend.PhysX5.Editor",
+	"rootNamespace": "Lge.PhysicsBackend.PhysX5.Editor",
+	"references": [
+		"Lge.PhysicsBackend.PhysX5"
+	],
+	"includePlatforms": [
+		"Editor"
+	],
+	"excludePlatforms": [],
+	"allowUnsafeCode": false,
+	"overrideReferences": false,
+	"precompiledReferences": [],
+	"autoReferenced": true,
+	"defineConstraints": [],
+	"versionDefines": [],
+	"noEngineReferences": false
+}

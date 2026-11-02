@@ -1,0 +1,14 @@
+{
+	"name": "Lge.PhysicsBackend.PhysX5",
+	"rootNamespace": "Lge.PhysicsBackend.PhysX5",
+	"references": [],
+	"includePlatforms": [],
+	"excludePlatforms": [],
+	"allowUnsafeCode": true,
+	"overrideReferences": false,
+	"precompiledReferences": [],
+	"autoReferenced": true,
+	"defineConstraints": [],
+	"versionDefines": [],
+	"noEngineReferences": false
+}

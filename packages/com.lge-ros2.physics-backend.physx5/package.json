@@ -1,0 +1,23 @@
+{
+	"name": "com.lge-ros2.physics-backend.physx5",
+	"version": "0.1.0",
+	"displayName": "PhysX 5 Physics Backend",
+	"description": "PhysX 5 physics backend for Unity 6 (Linux x86_64). Installs the native backend library into the project on first load and provides backend selection and diagnostics tools.",
+	"unity": "6000.6",
+	"unityRelease": "3f1",
+	"license": "MIT",
+	"author": {
+		"name": "LG Electronics",
+		"url": "https://github.com/lge-ros2"
+	},
+	"dependencies": {
+		"com.unity.modules.physics": "1.0.0"
+	},
+	"keywords": [
+		"physics",
+		"physx",
+		"physx5",
+		"backend",
+		"linux"
+	]
+}

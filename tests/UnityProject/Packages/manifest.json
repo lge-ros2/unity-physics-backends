@@ -1,0 +1,5 @@
+{
+	"dependencies": {
+		"com.lge-ros2.physics-backend.physx5": "file:../../../packages/com.lge-ros2.physics-backend.physx5"
+	}
+}

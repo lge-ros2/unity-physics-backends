@@ -1,0 +1,20 @@
+# CMake / native build
+native/build/
+build/
+*.o
+*.a
+
+# Test Unity project
+tests/UnityProject/Library/
+tests/UnityProject/Temp/
+tests/UnityProject/Logs/
+tests/UnityProject/UserSettings/
+tests/UnityProject/obj/
+tests/UnityProject/Assets/Plugins/PhysX5Backend/
+tests/UnityProject/*.csproj
+tests/UnityProject/*.sln
+tests/UnityProject/*.slnx
+
+# Editor
+.vscode/
+.idea/

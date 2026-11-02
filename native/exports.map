@@ -1,0 +1,8 @@
+{
+	global:
+		UnityPluginLoad;
+		UnityPluginUnload;
+		PhysX5Backend_GetIntegrationId;
+	local:
+		*;
+};
