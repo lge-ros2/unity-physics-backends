@@ -896,6 +896,8 @@ namespace backend::pxw
 
 			world->articulations.push_back(a);
 			Register(a, Kind::Articulation, a, world->state);
+			// Unity 6000.6.7f1 never sends AddActorsToScene for articulations either: they join the scene on creation.
+			a->added = true;
 			cmd.outArticulation = a;
 		}
 

@@ -48,7 +48,8 @@ namespace
 			info.version[i] = backend::kIntegrationVersion[i];
 			info.sdkVersion[i] = backend::kSdkVersion[i];
 		}
-		info.features = Physics::FeatureSupport::DynamicsSupport;
+		// Without ArticulationSupport Unity never sends any Articulation command (ArticulationBody stays inert).
+		info.features = Physics::FeatureSupport::DynamicsSupport | Physics::FeatureSupport::ArticulationSupport;
 		std::snprintf(info.name, sizeof(info.name), "%s", backend::kIntegrationName);
 		std::snprintf(info.desc, sizeof(info.desc), "%s", backend::kIntegrationDescription);
 		// info.limit keeps its default-initialized joint limit ranges.

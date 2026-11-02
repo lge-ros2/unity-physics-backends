@@ -120,6 +120,36 @@ public static class CloisimLikeProbe
 			pbox.transform.position = new Vector3(0f, 5f, 50f);
 			pbox.AddComponent<Rigidbody>();
 
+			// robot-like articulation: free root + two driven revolute wheels, resting on PFloor
+			var robot = GameObject.CreatePrimitive(PrimitiveType.Cube);
+			robot.name = "ROBOT";
+			robot.transform.position = new Vector3(5f, 1f, 50f);
+			robot.transform.localScale = new Vector3(0.5f, 0.2f, 0.4f);
+			var rootAb = robot.AddComponent<ArticulationBody>();
+			rootAb.mass = 5f;
+			var wheels = new ArticulationBody[2];
+			for (var i = 0; i < 2; i++)
+			{
+				var w = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+				w.name = "WHEEL" + i;
+				w.transform.SetParent(robot.transform, false);
+				w.transform.position = new Vector3(5f, 0.8f, 50f + (i == 0 ? 0.25f : -0.25f));
+				w.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+				w.transform.localScale = new Vector3(0.2f, 0.02f, 0.2f);
+				var ab = w.AddComponent<ArticulationBody>();
+				ab.mass = 0.5f;
+				ab.jointType = ArticulationJointType.RevoluteJoint;
+				ab.anchorRotation = Quaternion.identity;
+				ab.twistLock = ArticulationDofLock.FreeMotion;
+				var d = ab.xDrive;
+				d.stiffness = 0f;
+				d.damping = 100f;
+				d.forceLimit = 1000f;
+				d.targetVelocity = 360f;
+				ab.xDrive = d;
+				wheels[i] = ab;
+			}
+
 			yield return null;
 			var hit4 = Physics.Raycast(new Vector3(0f, 10f, 50f), Vector3.down, out var h4, 100f);
 			sb.AppendLine("[Probe] raycast primitive floor: hit=" + hit4 + (hit4 ? " pt=" + h4.point + " col=" + h4.collider.name : ""));
@@ -129,6 +159,9 @@ public static class CloisimLikeProbe
 
 			foreach (var o in new[] { box, box2, sphere, cyl, pbox, box3 })
 				sb.AppendLine("[Probe] " + o.name + " y=" + o.transform.position.y.ToString("F3") + " pos=" + o.transform.position);
+			sb.AppendLine("[Probe] ROBOT y=" + robot.transform.position.y.ToString("F3") + " pos=" + robot.transform.position);
+			foreach (var wb in wheels)
+				sb.AppendLine("[Probe] " + wb.name + " jointPos=" + (wb.dofCount > 0 ? wb.jointPosition[0].ToString("F2") : "n/a") + " jointVel=" + (wb.dofCount > 0 ? wb.jointVelocity[0].ToString("F2") : "n/a") + " pos=" + wb.transform.position);
 			sb.AppendLine("[Probe] DONE");
 			Debug.Log(sb.ToString());
 
