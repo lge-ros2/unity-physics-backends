@@ -1,4 +1,5 @@
 #include "core/Dispatch.h"
+#include "physx/common/PxEvents.h"
 #include "physx/common/PxObjects.h"
 
 #include "PhysicsBodyCommandData.h"
@@ -216,6 +217,7 @@ namespace backend::pxw
 			{
 				return;
 			}
+			NotifyShapeRemoved(*shape);
 			body->actor->detachShape(*shape->shape);
 			body->shapes.erase(std::remove(body->shapes.begin(), body->shapes.end(), shape), body->shapes.end());
 			shape->owner = nullptr;

@@ -87,9 +87,51 @@ namespace backend::pxw
 			return physx::PxFilterFlag::eDEFAULT;
 		}
 
-		// TODO(events): map FilterData::pairFlags onto eNOTIFY_* once contact events are implemented.
-		pairFlags = physx::PxPairFlag::eCONTACT_DEFAULT | physx::PxPairFlag::eDETECT_CCD_CONTACT;
+		// ShapePairEventFlags maps bit for bit onto PxPairFlag. Physics (solve + detect) always stays on;
+		// the notify / velocity bits come from either shape. Contact modification is not supported.
+		constexpr uint16_t kUnsupported = static_cast<uint16_t>(Physics::ShapePairEventFlags::ModifyContacts)
+			| static_cast<uint16_t>(Physics::ShapePairEventFlags::NextFree);
+		const uint16_t requested = (static_cast<uint16_t>(f0.pairFlags) | static_cast<uint16_t>(f1.pairFlags)) & ~kUnsupported;
+		const physx::PxPairFlags notify(requested);
+		pairFlags = physx::PxPairFlag::eCONTACT_DEFAULT | physx::PxPairFlag::eDETECT_CCD_CONTACT | notify;
+		if (notify & (physx::PxPairFlag::eNOTIFY_TOUCH_FOUND | physx::PxPairFlag::eNOTIFY_TOUCH_PERSISTS))
+		{
+			// Pre-solver velocities give the engine the relative velocity of the impact.
+			pairFlags |= physx::PxPairFlag::ePRE_SOLVER_VELOCITY;
+		}
 		return physx::PxFilterFlag::eDEFAULT;
+	}
+
+	physx::PxFilterData EncodeShapeFilter(const ShapeObj& shape)
+	{
+		Physics::FilterData data = shape.filter;
+		uint16_t supported = 0;
+		for (uint16_t flags : shape.supportedByLayer)
+		{
+			supported |= flags;
+		}
+		data.pairFlags = static_cast<Physics::ShapePairEventFlags>(static_cast<uint16_t>(data.pairFlags) | supported);
+		return EncodeFilter(data);
+	}
+
+	void UpdateShapeSimulationFilter(ShapeObj& shape)
+	{
+		const physx::PxFilterData oldData = shape.shape->getSimulationFilterData();
+		const physx::PxFilterData newData = EncodeShapeFilter(shape);
+		if (std::memcmp(&oldData, &newData, sizeof(newData)) == 0)
+		{
+			return;
+		}
+		shape.shape->setSimulationFilterData(newData);
+
+		// Existing pairs keep their old pair flags until they are filtered again.
+		const bool pairFlagsChanged = DecodeFilter(oldData).pairFlags != DecodeFilter(newData).pairFlags;
+		const BodyObj* owner = shape.owner;
+		if (pairFlagsChanged && owner != nullptr && owner->inScene && owner->world != nullptr && owner->world->scene != nullptr)
+		{
+			physx::PxShape* px = shape.shape;
+			owner->world->scene->resetFiltering(*owner->actor, &px, 1);
+		}
 	}
 
 	bool IsPairIgnored(uint16_t id0, uint16_t id1)

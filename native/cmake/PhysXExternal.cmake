@@ -43,14 +43,23 @@ endif()
 
 include(ExternalProject)
 
+# PHYSX_PREBUILT_LIB_DIR: reuse already built static libraries (e.g. another build directory)
+# instead of compiling PhysX again.
+set(PHYSX_PREBUILT_LIB_DIR "" CACHE PATH "Directory with prebuilt PhysX static libraries (skips the PhysX build)")
+
 set(PHYSX_BUILD_DIR ${CMAKE_BINARY_DIR}/physx-build)
-set(PHYSX_LIB_DIR ${PHYSX_BUILD_DIR}/out/bin/${PHYSX_PLATFORM_DIR}/release)
+if (PHYSX_PREBUILT_LIB_DIR)
+	set(PHYSX_LIB_DIR ${PHYSX_PREBUILT_LIB_DIR})
+else()
+	set(PHYSX_LIB_DIR ${PHYSX_BUILD_DIR}/out/bin/${PHYSX_PLATFORM_DIR}/release)
+endif()
 
 set(PHYSX_LIB_FILES)
 foreach(name IN LISTS PHYSX_LIB_NAMES)
 	list(APPEND PHYSX_LIB_FILES ${PHYSX_LIB_DIR}/lib${name}_static_64.a)
 endforeach()
 
+if (NOT PHYSX_PREBUILT_LIB_DIR)
 ExternalProject_Add(physx_sdk
 	SOURCE_DIR ${PHYSX_ROOT}/compiler/public
 	BINARY_DIR ${PHYSX_BUILD_DIR}
@@ -73,9 +82,12 @@ ExternalProject_Add(physx_sdk
 	BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> -j
 	INSTALL_COMMAND ""
 	BUILD_BYPRODUCTS ${PHYSX_LIB_FILES})
+endif()
 
 add_library(physx_sdk_libs INTERFACE)
-add_dependencies(physx_sdk_libs physx_sdk)
+if (NOT PHYSX_PREBUILT_LIB_DIR)
+	add_dependencies(physx_sdk_libs physx_sdk)
+endif()
 target_include_directories(physx_sdk_libs SYSTEM INTERFACE ${PHYSX_INCLUDE_DIRS})
 # Static libraries reference each other, so wrap them in a link group.
 target_link_libraries(physx_sdk_libs INTERFACE

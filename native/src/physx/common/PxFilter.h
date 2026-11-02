@@ -8,6 +8,11 @@ namespace backend::pxw
 	physx::PxFilterData EncodeFilter(const Physics::FilterData& data);
 	Physics::FilterData DecodeFilter(const physx::PxFilterData& data);
 
+	// Simulation filter data of a shape: its FilterData with the pair flags of Shape::SetSupportedMessages merged in.
+	physx::PxFilterData EncodeShapeFilter(const ShapeObj& shape);
+	// Pushes EncodeShapeFilter onto the PxShape; re-filters the shape's pairs when the pair flags changed.
+	void UpdateShapeSimulationFilter(ShapeObj& shape);
+
 	// Layer rule shared by the simulation filter shader.
 	bool LayersCollide(const Physics::FilterData& a, const Physics::FilterData& b);
 

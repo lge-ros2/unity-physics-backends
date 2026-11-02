@@ -32,7 +32,11 @@ namespace backend::pxw
 		Shape,
 		Material,
 		Mesh,
-		HeightField
+		HeightField,
+		Articulation,
+		Link,
+		LinkJoint,
+		Joint
 	};
 
 	// One lock domain: a world, or the "loose" domain for shapes and materials that belong to no world.
@@ -42,9 +46,13 @@ namespace backend::pxw
 	};
 
 	struct BodyObj;
+	struct LinkObj;
+	struct ArticulationObj;
 	struct ShapeObj;
 	struct MeshObj;
 	struct HeightFieldObj;
+	struct WorldEvents;
+	struct JointObj;
 
 	struct WorldObj
 	{
@@ -53,7 +61,10 @@ namespace backend::pxw
 		std::shared_ptr<WorldState> state;
 		void* userData = nullptr;
 		uint32_t scratchChunkCount = 0;
+		WorldEvents* events = nullptr; // PxEvents.cpp
 		std::vector<BodyObj*> bodies;
+		std::vector<ArticulationObj*> articulations;
+		std::vector<JointObj*> joints;
 	};
 
 	struct BodyObj
@@ -77,18 +88,21 @@ namespace backend::pxw
 		uint32_t velocityIterations = 1;
 		Physics::Pose kinematicTarget;
 		std::vector<ShapeObj*> shapes;
+		std::vector<JointObj*> joints; // joints attached to this body
 	};
 
 	struct ShapeObj
 	{
 		physx::PxShape* shape = nullptr;
 		BodyObj* owner = nullptr;
+		LinkObj* ownerLink = nullptr; // set instead of owner while attached to an articulation link
 		void* userData = nullptr;
 		Physics::ShapeGeometry geometry = {};
 		MeshObj* mesh = nullptr; // pinned convex / triangle mesh (geometry.meshGeometry.mesh)
 		HeightFieldObj* heightField = nullptr; // pinned heightfield (geometry.heightFieldGeometry.heightField)
 		Physics::ShapeFlags flags = Physics::ShapeFlags::None;
 		Physics::FilterData filter;
+		uint16_t supportedByLayer[32] = {}; // Shape::SetSupportedMessages: ShapePairEventFlags per layer
 	};
 
 	struct MaterialObj
@@ -170,6 +184,23 @@ namespace backend::pxw
 	// Triangle mesh / heightfield shapes can only simulate on static or kinematic bodies; elsewhere they stay query-only.
 	// Re-evaluates the shape's PhysX flags as if it were owned by owner (null = loose shape).
 	void ReapplyShapeFlags(ShapeObj& shape, const BodyObj* owner);
+	// Same for a shape that is (about to be) attached to an articulation link (links are never kinematic).
+	void ReapplyShapeFlagsForLink(ShapeObj& shape);
+
+	// Articulation module (PxArticulation.cpp). Callers hold the owning world domain.
+	void DestroyArticulationLocked(Handle h, ArticulationObj* articulation);
+	// Detaches a shape from its articulation link (shape becomes loose).
+	void DetachShapeFromLinkLocked(ShapeObj* shape);
+	// Adds a registered articulation handle to its world's scene. False if h is not an articulation of that world.
+	bool AddArticulationToSceneLocked(WorldObj* world, Handle h);
+	// Appends the user data of every articulation-link shape whose layer matches the mask.
+	void CollectLinkShapesUserData(const WorldObj& world, uint32_t layerMask, std::vector<void*>& out);
+	// Re-evaluates cached filter decisions of articulation links carrying one of the ignore ids.
+	void RefilterLinkShapes(WorldObj& world, uint16_t id0, uint16_t id1);
+	// Handle of the actor a shape is attached to (body or link), null when loose.
+	Handle ShapeOwnerHandle(const ShapeObj& shape);
+	// Engine user data of a registered link handle (does not lock a domain).
+	void* LinkUserData(Handle link);
 	// Re-evaluates the mesh-restricted shapes of a body that is (about to be) kinematic or dynamic.
 	void UpdateMeshShapeSimulation(BodyObj& body, bool kinematic);
 	// Pushes the shape's stored geometry into PhysX again (after a heightfield was modified).
@@ -194,4 +225,5 @@ namespace backend::pxw
 	void RegisterBodyHandlers();
 	void RegisterShapeHandlers();
 	void RegisterQueryHandlers();
+	void RegisterArticulationHandlers();
 }

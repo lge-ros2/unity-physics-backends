@@ -241,7 +241,8 @@ namespace backend::pxw
 		physx::PxTransform ShapeWorldPose(const ShapeObj& s)
 		{
 			const physx::PxTransform local = s.shape->getLocalPose();
-			return s.owner != nullptr ? s.owner->actor->getGlobalPose() * local : local;
+			const physx::PxRigidActor* actor = s.shape->getActor(); // body or articulation link
+			return actor != nullptr ? actor->getGlobalPose() * local : local;
 		}
 
 		void FillBounds(const physx::PxBounds3& bounds, Physics::Vec3& extents, Physics::Vec3& center)
@@ -282,6 +283,7 @@ namespace backend::pxw
 						}
 					}
 				}
+				RefilterLinkShapes(*world, id0, id1);
 			}
 		}
 
@@ -363,6 +365,12 @@ namespace backend::pxw
 				cmd.value.userData = owner->userData;
 				cmd.value.type = owner->isStatic ? Physics::ActorType::Static : Physics::ActorType::Dynamic;
 			}
+			else if (const Handle link = ShapeOwnerHandle(*lock.get<ShapeObj>()))
+			{
+				cmd.value.actor = link;
+				cmd.value.userData = LinkUserData(link);
+				cmd.value.type = Physics::ActorType::Link;
+			}
 		}
 
 		void GetUserData(Handle sdkObject, const Context& ctx, Command& c)
@@ -384,7 +392,7 @@ namespace backend::pxw
 			if (lock)
 			{
 				ShapeObj* shape = lock.get<ShapeObj>();
-				ApplyShapeFlags(*shape, flags, MeshSimulationAllowed(shape->owner));
+				ApplyShapeFlags(*shape, flags, shape->ownerLink == nullptr && MeshSimulationAllowed(shape->owner));
 			}
 		}
 
@@ -408,9 +416,8 @@ namespace backend::pxw
 				return;
 			}
 			shape->filter = data;
-			const physx::PxFilterData encoded = EncodeFilter(data);
-			shape->shape->setSimulationFilterData(encoded);
-			shape->shape->setQueryFilterData(encoded);
+			shape->shape->setQueryFilterData(EncodeFilter(data));
+			UpdateShapeSimulationFilter(*shape);
 		}
 
 		void SetMaterial(Handle sdkObject, const Context& ctx, Command& c)
@@ -574,6 +581,11 @@ namespace backend::pxw
 	void ReapplyShapeFlags(ShapeObj& shape, const BodyObj* owner)
 	{
 		ApplyShapeFlags(shape, shape.flags, MeshSimulationAllowed(owner));
+	}
+
+	void ReapplyShapeFlagsForLink(ShapeObj& shape)
+	{
+		ApplyShapeFlags(shape, shape.flags, false);
 	}
 
 	void UpdateMeshShapeSimulation(BodyObj& body, bool kinematic)

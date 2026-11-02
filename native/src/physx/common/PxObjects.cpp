@@ -1,6 +1,8 @@
 #include "physx/common/PxObjects.h"
 
 #include "physx/common/PhysXSdk.h"
+#include "physx/common/PxEvents.h"
+#include "physx/common/PxJoint.h"
 #include "physx/common/PxMesh.h"
 
 #include <algorithm>
@@ -259,6 +261,11 @@ namespace backend::pxw
 	{
 		void DetachFromOwner(ShapeObj* shape)
 		{
+			if (shape->ownerLink != nullptr)
+			{
+				DetachShapeFromLinkLocked(shape);
+				return;
+			}
 			BodyObj* owner = shape->owner;
 			if (owner == nullptr)
 			{
@@ -273,6 +280,7 @@ namespace backend::pxw
 
 	void DestroyShapeLocked(Handle h, ShapeObj* shape)
 	{
+		NotifyShapeRemoved(*shape);
 		DetachFromOwner(shape);
 		shape->shape->release();
 		ReleaseShapeGeometryRefs(*shape);
@@ -282,6 +290,8 @@ namespace backend::pxw
 
 	void DestroyBodyLocked(Handle h, BodyObj* body)
 	{
+		NotifyBodyRemoved(*body);
+		DetachJointsFromBodyLocked(body);
 		// Releasing the actor removes it from the scene and detaches its shapes.
 		body->actor->release();
 		for (ShapeObj* shape : body->shapes)
@@ -302,11 +312,18 @@ namespace backend::pxw
 
 	void DestroyWorldLocked(Handle h, WorldObj* world)
 	{
+		DestroyJointsOfWorldLocked(world);
+		const std::vector<ArticulationObj*> articulations = world->articulations;
+		for (ArticulationObj* articulation : articulations)
+		{
+			DestroyArticulationLocked(articulation, articulation);
+		}
 		const std::vector<BodyObj*> bodies = world->bodies;
 		for (BodyObj* body : bodies)
 		{
 			DestroyBodyLocked(body, body);
 		}
+		DetachWorldEvents(*world);
 		if (world->scene != nullptr)
 		{
 			world->scene->release();

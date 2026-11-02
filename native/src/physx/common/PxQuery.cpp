@@ -574,7 +574,7 @@ namespace backend::pxw
 					const ShapeObj* shape = ShapeObjOf(px);
 					if (shape != nullptr)
 					{
-						entries.push_back({ const_cast<ShapeObj*>(shape), shape->owner, shape->userData, shape->geometry.type });
+						entries.push_back({ const_cast<ShapeObj*>(shape), ShapeOwnerHandle(*shape), shape->userData, shape->geometry.type });
 					}
 				}
 			}
@@ -747,7 +747,7 @@ namespace backend::pxw
 
 		bool BodyAccepted(const QueryParams& p, const ShapeObj& shape)
 		{
-			return p.AcceptsBody(shape.owner == nullptr || shape.owner->isStatic);
+			return p.AcceptsBody(shape.ownerLink == nullptr && (shape.owner == nullptr || shape.owner->isStatic));
 		}
 
 		void RayCastAgainstShape(Handle sdkObject, const Context& ctx, Command& c)

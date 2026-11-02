@@ -3,8 +3,10 @@
 #include "core/Dispatch.h"
 #include "physx/common/PhysXSdk.h"
 #include "physx/common/PxCookingBackend.h"
+#include "physx/common/PxEvents.h"
 #include "physx/common/PxMesh.h"
 #include "physx/common/PxFilter.h"
+#include "physx/common/PxJoint.h"
 #include "physx/common/PxObjects.h"
 
 #include "PhysicsWorldCommandData.h"
@@ -115,6 +117,7 @@ namespace backend::pxw
 			world->state = std::make_shared<WorldState>();
 			world->userData = cmd.userData;
 			world->scene->userData = world;
+			AttachWorldEvents(*world);
 			Register(world, Kind::World, world, world->state);
 			cmd.outWorld = world;
 		}
@@ -185,8 +188,9 @@ namespace backend::pxw
 			Lock lock(Target{ Kind::World, sdkObject, ctx.world });
 			if (lock)
 			{
-				// Articulations and joints are still served by the stub, so only bodies are counted here.
+				// Joints are still served by the stub, so only bodies and articulations are counted here.
 				cmd.value.bodies = static_cast<uint32_t>(lock.get<WorldObj>()->bodies.size());
+				cmd.value.articulations = static_cast<uint32_t>(lock.get<WorldObj>()->articulations.size());
 			}
 		}
 
@@ -206,7 +210,7 @@ namespace backend::pxw
 			{
 				const physx::PxU32 actors = scene->getNbActors(
 					physx::PxActorTypeFlag::eRIGID_STATIC | physx::PxActorTypeFlag::eRIGID_DYNAMIC);
-				if (actors == 0)
+				if (actors == 0 && scene->getNbArticulations() == 0)
 				{
 					return;
 				}
@@ -215,6 +219,7 @@ namespace backend::pxw
 			// jobGroupdId and expectedMaxDeltaTime are not needed: the step runs synchronously on the caller.
 			scene->simulate(cmd.deltaTime);
 			scene->fetchResults(true);
+			FinishStepEvents(*lock.get<WorldObj>());
 			cmd.ranSimulation = true;
 		}
 
@@ -293,7 +298,12 @@ namespace backend::pxw
 
 			auto add = [world](Handle h) {
 				auto* body = static_cast<BodyObj*>(Lookup(h, Kind::Body));
-				if (body == nullptr || body->world != world || body->inScene)
+				if (body == nullptr)
+				{
+					AddArticulationToSceneLocked(world, h);
+					return;
+				}
+				if (body->world != world || body->inScene)
 				{
 					return;
 				}
@@ -302,7 +312,7 @@ namespace backend::pxw
 			};
 
 			// The header describes an array of handles; accept a single handle passed directly as well.
-			if (IsKind(cmd.actors, Kind::Body))
+			if (IsKind(cmd.actors, Kind::Body) || IsKind(cmd.actors, Kind::Articulation))
 			{
 				add(cmd.actors);
 				return;
@@ -345,6 +355,7 @@ namespace backend::pxw
 					}
 				}
 			}
+			CollectLinkShapesUserData(*lock.get<WorldObj>(), cmd.layerMask, userData);
 			cmd.callback(userData.data(), userData.size());
 		}
 	}
@@ -378,7 +389,10 @@ namespace backend
 		pxw::RegisterBodyHandlers();
 		pxw::RegisterShapeHandlers();
 		pxw::RegisterQueryHandlers();
+		pxw::RegisterEventHandlers();
 		pxw::RegisterMeshHandlers();
+		pxw::RegisterArticulationHandlers();
+		pxw::RegisterJointHandlers();
 	}
 
 	void PhysXWorldOnSdkInitialized(uint16_t engineObjectIdOffset)

@@ -44,7 +44,11 @@ if (PHYSX5_LINK_PHYSX)
 		src/physx/common/PxBody.cpp
 		src/physx/common/PxShape.cpp
 		src/physx/common/PxQuery.cpp
+		src/physx/common/PxEvents.cpp
+		src/physx/common/PxJoint.cpp
 		src/physx/common/PxMesh.cpp
+		src/physx/common/PxArticulation.cpp
+		src/physx/v${PHYSX_SDK}/PxArticulationBackend.cpp
 		src/physx/v${PHYSX_SDK}/PxCookingBackend.cpp)
 	target_compile_definitions(${BACKEND_TARGET} PRIVATE PHYSX5_LINK_PHYSX=1)
 	target_include_directories(${BACKEND_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/physx/v${PHYSX_SDK})
@@ -108,7 +112,43 @@ if (BUILD_TESTS AND PHYSX5_LINK_PHYSX)
 		FALL_TEST_BACKEND_PATH="$<TARGET_FILE:${BACKEND_TARGET}>"
 		FALL_TEST_SDK=${PHYSX_SDK})
 
+	add_executable(event_test tests/event_test.cpp)
+	target_include_directories(event_test SYSTEM PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity/PhysicsBackend)
+	target_compile_options(event_test PRIVATE -Wall -Wextra)
+	target_link_libraries(event_test PRIVATE dl pthread)
+	add_dependencies(event_test ${BACKEND_TARGET})
+	target_compile_definitions(event_test PRIVATE
+		FALL_TEST_BACKEND_PATH="$<TARGET_FILE:${BACKEND_TARGET}>"
+		FALL_TEST_SDK=${PHYSX_SDK})
+
+	add_executable(joint_test tests/joint_test.cpp)
+	target_include_directories(joint_test SYSTEM PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity/PhysicsBackend)
+	target_compile_options(joint_test PRIVATE -Wall -Wextra)
+	target_link_libraries(joint_test PRIVATE dl)
+	add_dependencies(joint_test ${BACKEND_TARGET})
+	target_compile_definitions(joint_test PRIVATE
+		FALL_TEST_BACKEND_PATH="$<TARGET_FILE:${BACKEND_TARGET}>"
+		FALL_TEST_SDK=${PHYSX_SDK})
+
+	add_executable(articulation_test tests/articulation_test.cpp)
+	target_include_directories(articulation_test SYSTEM PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity/PhysicsBackend)
+	target_compile_options(articulation_test PRIVATE -Wall -Wextra)
+	target_link_libraries(articulation_test PRIVATE dl)
+	add_dependencies(articulation_test ${BACKEND_TARGET})
+	target_compile_definitions(articulation_test PRIVATE
+		FALL_TEST_BACKEND_PATH="$<TARGET_FILE:${BACKEND_TARGET}>"
+		FALL_TEST_SDK=${PHYSX_SDK})
+
 	enable_testing()
+	add_test(NAME articulation_test COMMAND articulation_test)
+	add_test(NAME joint_test COMMAND joint_test)
+	add_test(NAME event_test COMMAND event_test)
 	add_test(NAME mesh_test COMMAND mesh_test)
 	add_test(NAME fall_test COMMAND fall_test)
 	add_test(NAME query_test COMMAND query_test)
