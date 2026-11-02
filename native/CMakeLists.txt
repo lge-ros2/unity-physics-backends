@@ -16,6 +16,7 @@ set(PHYSX5_DEV_INSTALL_DIR "" CACHE STRING "Optional extra install directory (e.
 set(PHYSX_SDK 5 CACHE STRING "PhysX SDK to link: 5 = PhysX 5.x backend (shipped), 4 = PhysX 4.1 reference backend (verification only)")
 set_property(CACHE PHYSX_SDK PROPERTY STRINGS 5 4)
 option(PHYSX5_LINK_PHYSX "Link the PhysX SDK (third_party/PhysX4 or PhysX5) into the backend" ON)
+option(BUILD_TESTS "Build the native test executables (tests/*.cpp)" OFF)
 
 if (PHYSX_SDK EQUAL 4)
 	set(BACKEND_TARGET PhysX4RefBackend)
@@ -34,7 +35,15 @@ target_compile_definitions(${BACKEND_TARGET} PRIVATE BACKEND_PHYSX_SDK=${PHYSX_S
 
 if (PHYSX5_LINK_PHYSX)
 	include(cmake/PhysXExternal.cmake)
-	target_sources(${BACKEND_TARGET} PRIVATE src/physx/common/PhysXSdk.cpp)
+	target_sources(${BACKEND_TARGET} PRIVATE
+		src/physx/common/PhysXSdk.cpp
+		src/physx/common/PxObjects.cpp
+		src/physx/common/PxFilter.cpp
+		src/physx/common/PxMaterial.cpp
+		src/physx/common/PxWorld.cpp
+		src/physx/common/PxBody.cpp
+		src/physx/common/PxShape.cpp
+		src/physx/common/PxQuery.cpp)
 	target_compile_definitions(${BACKEND_TARGET} PRIVATE PHYSX5_LINK_PHYSX=1)
 	target_include_directories(${BACKEND_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/physx/v${PHYSX_SDK})
 	target_link_libraries(${BACKEND_TARGET} PRIVATE physx_sdk_libs)
@@ -61,6 +70,23 @@ target_link_libraries(${BACKEND_TARGET} PRIVATE
 	-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map
 	-Wl,--no-undefined)
 set_target_properties(${BACKEND_TARGET} PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/exports.map)
+
+if (BUILD_TESTS AND PHYSX5_LINK_PHYSX)
+	# Loads the backend .so with dlopen and drives it through the Unity command entry point.
+	add_executable(fall_test tests/fall_test.cpp)
+	target_include_directories(fall_test SYSTEM PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity/PhysicsBackend)
+	target_compile_options(fall_test PRIVATE -Wall -Wextra)
+	target_link_libraries(fall_test PRIVATE dl)
+	add_dependencies(fall_test ${BACKEND_TARGET})
+	target_compile_definitions(fall_test PRIVATE
+		FALL_TEST_BACKEND_PATH="$<TARGET_FILE:${BACKEND_TARGET}>"
+		FALL_TEST_SDK=${PHYSX_SDK})
+
+	enable_testing()
+	add_test(NAME fall_test COMMAND fall_test)
+endif()
 
 set(PHYSX5_DEFAULT_INSTALL_DIR
 	${CMAKE_CURRENT_SOURCE_DIR}/../packages/com.lge-ros2.physics-backend.physx5/Plugins~/linux)

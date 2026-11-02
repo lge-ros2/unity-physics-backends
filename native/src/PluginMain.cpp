@@ -6,6 +6,7 @@
 
 #ifdef PHYSX5_LINK_PHYSX
 #include "physx/common/PhysXSdk.h"
+#include "physx/common/PxWorld.h"
 #endif
 
 #include <atomic>
@@ -18,7 +19,12 @@ namespace
 	void InitializeSdkHandler(Physics::SDKObjectHandle, const PhysicsCommands::Context&, PhysicsCommands::Command& c)
 	{
 #ifdef PHYSX5_LINK_PHYSX
-		static_cast<PhysicsCommands::SdkData::InitializeSdk&>(c).result = backend::physx_sdk::Initialize();
+		auto& init = static_cast<PhysicsCommands::SdkData::InitializeSdk&>(c);
+		init.result = backend::physx_sdk::Initialize();
+		if (init.result)
+		{
+			backend::PhysXWorldOnSdkInitialized(init.engineObjectIdOffset);
+		}
 #else
 		static_cast<PhysicsCommands::SdkData::InitializeSdk&>(c).result = true;
 #endif
@@ -27,6 +33,7 @@ namespace
 	void ShutdownSdkHandler(Physics::SDKObjectHandle, const PhysicsCommands::Context&, PhysicsCommands::Command&)
 	{
 #ifdef PHYSX5_LINK_PHYSX
+		backend::ShutdownPhysXWorld();
 		backend::physx_sdk::Shutdown();
 #endif
 	}
@@ -65,7 +72,11 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnit
 		return;
 	}
 
+	// Stub handlers are the fallback; the PhysX-backed handlers overwrite what they implement.
 	backend::RegisterStubWorldHandlers();
+#ifdef PHYSX5_LINK_PHYSX
+	backend::RegisterPhysXWorldHandlers();
+#endif
 	backend::Bind(PhysicsCommands::SDK::InitializeSdk, &InitializeSdkHandler);
 	backend::Bind(PhysicsCommands::SDK::ShutdownSdk, &ShutdownSdkHandler);
 	backend::Bind(PhysicsCommands::SDK::GetIntegrationInfo, &GetIntegrationInfoHandler);
@@ -99,5 +110,8 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnit
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload()
 {
 	// Unity offers no way to unregister the entry point, so the registration flag stays set.
+#ifdef PHYSX5_LINK_PHYSX
+	backend::ShutdownPhysXWorld();
+#endif
 	backend::ResetStubWorld();
 }
