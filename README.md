@@ -31,10 +31,10 @@ A backend inside a UPM package is not selectable by Unity (known issue), which i
 
 ## Build native library
 
-PhysX 5.6.1 is a git submodule (CPU only, linked statically). The first build compiles it and takes a few minutes.
+PhysX is linked statically from a git submodule (CPU only). The first build compiles it and takes a few minutes.
 
 ```bash
-git submodule update --init --depth 1 native/third_party/PhysX
+git submodule update --init --depth 1 native/third_party/PhysX5
 cmake -S native -B native/build
 cmake --build native/build
 cmake --install native/build   # -> packages/.../Plugins~/linux/
@@ -42,6 +42,18 @@ native/scripts/sync-unity-headers.sh --check   # compare vendored Unity headers 
 ```
 
 Set `-DPHYSX5_DEV_INSTALL_DIR=<project>/Assets/Plugins/PhysX5Backend/linux` to install straight into a Unity project. Restart the editor after replacing the library.
+
+### PhysX 4.1 reference backend (development only)
+
+`PhysX 4 Ref` builds the same backend code against PhysX 4.1 so the glue can be checked against Unity's built-in PhysX 4 before comparing with PhysX 5. It is not shipped in the package.
+
+```bash
+git submodule update --init --depth 1 --checkout native/third_party/PhysX4   # large (~800 MB)
+cmake -S native -B native/build-ref -DPHYSX_SDK=4
+cmake --build native/build-ref        # -> libPhysX4RefBackend.so
+```
+
+Copy it to a Unity project's `Assets/Plugins/` (Editor Linux x86_64, preload) and select `PhysX 4 Ref` under Project Settings > Physics > GameObject SDK. Trace with `PHYSX4REF_BACKEND_TRACE=1`.
 
 ## Trace
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(PhysX5Backend LANGUAGES CXX)
+project(PhysicsBackend LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,49 +13,62 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 set(PHYSX5_DEV_INSTALL_DIR "" CACHE STRING "Optional extra install directory (e.g. a Unity project Plugins folder)")
-option(PHYSX5_LINK_PHYSX "Link the PhysX SDK (third_party/PhysX) into the backend" ON)
+set(PHYSX_SDK 5 CACHE STRING "PhysX SDK to link: 5 = PhysX 5.x backend (shipped), 4 = PhysX 4.1 reference backend (verification only)")
+set_property(CACHE PHYSX_SDK PROPERTY STRINGS 5 4)
+option(PHYSX5_LINK_PHYSX "Link the PhysX SDK (third_party/PhysX4 or PhysX5) into the backend" ON)
 
-add_library(PhysX5Backend SHARED
+if (PHYSX_SDK EQUAL 4)
+	set(BACKEND_TARGET PhysX4RefBackend)
+else()
+	set(BACKEND_TARGET PhysX5Backend)
+endif()
+
+add_library(${BACKEND_TARGET} SHARED
 	src/PluginMain.cpp
 	src/Exports.cpp
 	src/core/Dispatch.cpp
 	src/core/CommandTrace.cpp
 	src/core/StubWorld.cpp)
 
+target_compile_definitions(${BACKEND_TARGET} PRIVATE BACKEND_PHYSX_SDK=${PHYSX_SDK})
+
 if (PHYSX5_LINK_PHYSX)
 	include(cmake/PhysXExternal.cmake)
-	target_sources(PhysX5Backend PRIVATE src/physx/PhysXSdk.cpp)
-	target_compile_definitions(PhysX5Backend PRIVATE PHYSX5_LINK_PHYSX=1)
-	target_link_libraries(PhysX5Backend PRIVATE physx_sdk_libs)
+	target_sources(${BACKEND_TARGET} PRIVATE src/physx/common/PhysXSdk.cpp)
+	target_compile_definitions(${BACKEND_TARGET} PRIVATE PHYSX5_LINK_PHYSX=1)
+	target_include_directories(${BACKEND_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/physx/v${PHYSX_SDK})
+	target_link_libraries(${BACKEND_TARGET} PRIVATE physx_sdk_libs)
 endif()
 
-set_target_properties(PhysX5Backend PROPERTIES
-	OUTPUT_NAME PhysX5Backend
+set_target_properties(${BACKEND_TARGET} PROPERTIES
+	OUTPUT_NAME ${BACKEND_TARGET}
 	PREFIX "lib"
 	SUFFIX ".so")
 
-target_include_directories(PhysX5Backend PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(${BACKEND_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # SYSTEM: keep -Wall/-Wextra noise from the vendored Unity headers out of the build.
-target_include_directories(PhysX5Backend SYSTEM PRIVATE
+target_include_directories(${BACKEND_TARGET} SYSTEM PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity
 	${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity/PhysicsBackend)
 
-target_compile_options(PhysX5Backend PRIVATE
+target_compile_options(${BACKEND_TARGET} PRIVATE
 	-Wall -Wextra -fPIC -fvisibility=hidden -fvisibility-inlines-hidden -O2)
 
 # Statically link the C++ runtime and export only the Unity entry points.
-target_link_libraries(PhysX5Backend PRIVATE
+target_link_libraries(${BACKEND_TARGET} PRIVATE
 	-static-libstdc++ -static-libgcc
 	-Wl,--exclude-libs,ALL -Wl,-Bsymbolic
 	-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map
 	-Wl,--no-undefined)
-set_target_properties(PhysX5Backend PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/exports.map)
+set_target_properties(${BACKEND_TARGET} PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/exports.map)
 
 set(PHYSX5_DEFAULT_INSTALL_DIR
 	${CMAKE_CURRENT_SOURCE_DIR}/../packages/com.lge-ros2.physics-backend.physx5/Plugins~/linux)
 
-install(TARGETS PhysX5Backend LIBRARY DESTINATION ${PHYSX5_DEFAULT_INSTALL_DIR})
+if (PHYSX_SDK EQUAL 5)
+	install(TARGETS ${BACKEND_TARGET} LIBRARY DESTINATION ${PHYSX5_DEFAULT_INSTALL_DIR})
+endif()
 
 if (PHYSX5_DEV_INSTALL_DIR)
-	install(TARGETS PhysX5Backend LIBRARY DESTINATION ${PHYSX5_DEV_INSTALL_DIR})
+	install(TARGETS ${BACKEND_TARGET} LIBRARY DESTINATION ${PHYSX5_DEV_INSTALL_DIR})
 endif()

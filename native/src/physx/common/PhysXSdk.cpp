@@ -1,6 +1,7 @@
-#include "physx/PhysXSdk.h"
+#include "physx/common/PhysXSdk.h"
 
 #include "core/Dispatch.h"
+#include "PxCompat.h"
 
 #include <PxPhysicsAPI.h>
 
@@ -46,8 +47,8 @@ namespace backend::physx_sdk
 			return false;
 		}
 
-		BACKEND_LOGF("PhysX %d.%d.%d initialized (PxPhysics created)",
-			PX_PHYSICS_VERSION_MAJOR, PX_PHYSICS_VERSION_MINOR, PX_PHYSICS_VERSION_BUGFIX);
+		BACKEND_LOGF("PhysX %d.%d.%d initialized (PxPhysics created, compat v%d)",
+			PX_PHYSICS_VERSION_MAJOR, PX_PHYSICS_VERSION_MINOR, PX_PHYSICS_VERSION_BUGFIX, compat::kPhysXMajor);
 		return true;
 	}
 

@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-extern "C" UNITY_INTERFACE_EXPORT uint32_t PhysX5Backend_GetIntegrationId()
+extern "C" UNITY_INTERFACE_EXPORT uint32_t PhysicsBackend_GetIntegrationId()
 {
 	return backend::kIntegrationId;
 }

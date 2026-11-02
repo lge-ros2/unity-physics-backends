@@ -1,3 +1,8 @@
-[submodule "native/third_party/PhysX"]
-	path = native/third_party/PhysX
+[submodule "native/third_party/PhysX5"]
+	path = native/third_party/PhysX5
 	url = https://github.com/NVIDIA-Omniverse/PhysX.git
+[submodule "native/third_party/PhysX4"]
+	path = native/third_party/PhysX4
+	url = https://github.com/NVIDIAGameWorks/PhysX.git
+	branch = 4.1
+	update = none

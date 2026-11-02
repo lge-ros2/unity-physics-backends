@@ -2,7 +2,7 @@
 	global:
 		UnityPluginLoad;
 		UnityPluginUnload;
-		PhysX5Backend_GetIntegrationId;
+		PhysicsBackend_GetIntegrationId;
 	local:
 		*;
 };

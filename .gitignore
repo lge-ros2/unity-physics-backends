@@ -19,3 +19,5 @@ tests/BackendTestProject/*.slnx
 # Editor
 .vscode/
 .idea/
+tests/BackendTestProject/Assets/Plugins/PhysX4RefBackend/
+tests/BackendTestProject/Assets/Plugins/PhysX4RefBackend.meta

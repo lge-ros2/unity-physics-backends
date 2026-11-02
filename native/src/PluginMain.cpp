@@ -5,7 +5,7 @@
 #include "PhysicsGeneralCommandData.h"
 
 #ifdef PHYSX5_LINK_PHYSX
-#include "physx/PhysXSdk.h"
+#include "physx/common/PhysXSdk.h"
 #endif
 
 #include <atomic>
