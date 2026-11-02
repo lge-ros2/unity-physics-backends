@@ -43,7 +43,9 @@ if (PHYSX5_LINK_PHYSX)
 		src/physx/common/PxWorld.cpp
 		src/physx/common/PxBody.cpp
 		src/physx/common/PxShape.cpp
-		src/physx/common/PxQuery.cpp)
+		src/physx/common/PxQuery.cpp
+		src/physx/common/PxMesh.cpp
+		src/physx/v${PHYSX_SDK}/PxCookingBackend.cpp)
 	target_compile_definitions(${BACKEND_TARGET} PRIVATE PHYSX5_LINK_PHYSX=1)
 	target_include_directories(${BACKEND_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/physx/v${PHYSX_SDK})
 	target_link_libraries(${BACKEND_TARGET} PRIVATE physx_sdk_libs)
@@ -84,8 +86,32 @@ if (BUILD_TESTS AND PHYSX5_LINK_PHYSX)
 		FALL_TEST_BACKEND_PATH="$<TARGET_FILE:${BACKEND_TARGET}>"
 		FALL_TEST_SDK=${PHYSX_SDK})
 
+	add_executable(query_test tests/query_test.cpp)
+	target_include_directories(query_test SYSTEM PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity/PhysicsBackend)
+	target_compile_options(query_test PRIVATE -Wall -Wextra)
+	target_link_libraries(query_test PRIVATE dl)
+	add_dependencies(query_test ${BACKEND_TARGET})
+	target_compile_definitions(query_test PRIVATE
+		FALL_TEST_BACKEND_PATH="$<TARGET_FILE:${BACKEND_TARGET}>"
+		FALL_TEST_SDK=${PHYSX_SDK})
+
+	add_executable(mesh_test tests/mesh_test.cpp)
+	target_include_directories(mesh_test SYSTEM PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity
+		${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity/PhysicsBackend)
+	target_compile_options(mesh_test PRIVATE -Wall -Wextra)
+	target_link_libraries(mesh_test PRIVATE dl)
+	add_dependencies(mesh_test ${BACKEND_TARGET})
+	target_compile_definitions(mesh_test PRIVATE
+		FALL_TEST_BACKEND_PATH="$<TARGET_FILE:${BACKEND_TARGET}>"
+		FALL_TEST_SDK=${PHYSX_SDK})
+
 	enable_testing()
+	add_test(NAME mesh_test COMMAND mesh_test)
 	add_test(NAME fall_test COMMAND fall_test)
+	add_test(NAME query_test COMMAND query_test)
 endif()
 
 set(PHYSX5_DEFAULT_INSTALL_DIR

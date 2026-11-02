@@ -189,6 +189,8 @@ namespace backend::pxw
 				shape->owner = nullptr;
 			}
 
+			// Mesh shapes may not simulate on a dynamic body; PhysX rejects the attach otherwise.
+			ReapplyShapeFlags(*shape, body);
 			if (!body->actor->attachShape(*shape->shape))
 			{
 				BACKEND_ERRORF("PxRigidActor::attachShape failed");
@@ -496,7 +498,7 @@ namespace backend::pxw
 			size_t simShapes = 0;
 			for (const ShapeObj* shape : b->shapes)
 			{
-				if ((shape->flags & Physics::ShapeFlags::Trigger) == Physics::ShapeFlags::None)
+				if (shape->shape->getFlags() & physx::PxShapeFlag::eSIMULATION_SHAPE)
 				{
 					++simShapes;
 				}
@@ -718,7 +720,15 @@ namespace backend::pxw
 		const bool wantKinematic = (flags & BodyFlags::Kinematic) != BodyFlags::None;
 		if (wantKinematic != IsKinematic(b))
 		{
+			if (!wantKinematic)
+			{
+				UpdateMeshShapeSimulation(b, false);
+			}
 			b.dynamic->setRigidBodyFlag(physx::PxRigidBodyFlag::eKINEMATIC, wantKinematic);
+			if (wantKinematic)
+			{
+				UpdateMeshShapeSimulation(b, true);
+			}
 		}
 		ApplyCcd(b);
 	}

@@ -1,6 +1,7 @@
 #include "physx/common/PxObjects.h"
 
 #include "physx/common/PhysXSdk.h"
+#include "physx/common/PxMesh.h"
 
 #include <algorithm>
 #include <atomic>
@@ -274,6 +275,7 @@ namespace backend::pxw
 	{
 		DetachFromOwner(shape);
 		shape->shape->release();
+		ReleaseShapeGeometryRefs(*shape);
 		Unregister(h);
 		delete shape;
 	}

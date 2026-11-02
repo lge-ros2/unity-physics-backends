@@ -1,6 +1,7 @@
 #include "core/Dispatch.h"
 #include "physx/common/PhysXSdk.h"
 #include "physx/common/PxFilter.h"
+#include "physx/common/PxMesh.h"
 #include "physx/common/PxObjects.h"
 
 #include "PhysicsShapeCommandData.h"
@@ -23,18 +24,68 @@ namespace backend::pxw
 			return std::isfinite(v) ? std::max(v, kMinExtent) : kMinExtent;
 		}
 
-		// Converts a Physics::ShapeGeometry into a PhysX geometry. Only box / sphere / capsule are supported.
+		// Mesh scales keep their sign (mirroring) but must not collapse to zero.
+		float ClampScale(float v)
+		{
+			if (!std::isfinite(v))
+			{
+				return 1.0f;
+			}
+			return std::fabs(v) < kMinExtent ? std::copysign(kMinExtent, v) : v;
+		}
+
+		physx::PxMeshScale ToMeshScale(const Physics::Vec3& s)
+		{
+			return physx::PxMeshScale(physx::PxVec3(ClampScale(s.x), ClampScale(s.y), ClampScale(s.z)));
+		}
+
+		// Converts a Physics::ShapeGeometry into a PhysX geometry (box, sphere, capsule, convex / triangle mesh, heightfield).
 		struct GeometryBuilder
 		{
 			physx::PxBoxGeometry box;
 			physx::PxSphereGeometry sphere;
 			physx::PxCapsuleGeometry capsule;
+			physx::PxConvexMeshGeometry convexMesh;
+			physx::PxTriangleMeshGeometry triangleMesh;
+			physx::PxHeightFieldGeometry heightField;
 
-			// Returns null for unsupported geometry types.
+			// Returns null for unsupported geometry types and for mesh handles that are not known.
 			const physx::PxGeometry* Build(const Physics::ShapeGeometry& g)
 			{
 				switch (g.type)
 				{
+				case Physics::GeometryType::ConvexMesh:
+				{
+					const MeshObj* mesh = FindMesh(g.meshGeometry.mesh);
+					if (mesh == nullptr || mesh->convex == nullptr)
+					{
+						return nullptr;
+					}
+					convexMesh = physx::PxConvexMeshGeometry(mesh->convex, ToMeshScale(g.meshGeometry.scale));
+					return &convexMesh;
+				}
+				case Physics::GeometryType::TriangleMesh:
+				{
+					const MeshObj* mesh = FindMesh(g.meshGeometry.mesh);
+					if (mesh == nullptr || mesh->triangle == nullptr)
+					{
+						return nullptr;
+					}
+					triangleMesh = physx::PxTriangleMeshGeometry(mesh->triangle, ToMeshScale(g.meshGeometry.scale));
+					return &triangleMesh;
+				}
+				case Physics::GeometryType::Terrain:
+				{
+					const HeightFieldObj* field = FindHeightField(g.heightFieldGeometry.heightField);
+					if (field == nullptr || field->field == nullptr)
+					{
+						return nullptr;
+					}
+					// Samples are laid out as rows along x and columns along z; scale = (x spacing, height scale, z spacing).
+					const Physics::Vec3& s = g.heightFieldGeometry.scale;
+					heightField = physx::PxHeightFieldGeometry(field->field, physx::PxMeshGeometryFlags(), Clamp(s.y), Clamp(s.x), Clamp(s.z));
+					return &heightField;
+				}
 				case Physics::GeometryType::Box:
 					box = physx::PxBoxGeometry(Clamp(g.boxGeometry.halfExtents.x), Clamp(g.boxGeometry.halfExtents.y),
 						Clamp(g.boxGeometry.halfExtents.z));
@@ -62,16 +113,96 @@ namespace backend::pxw
 			const uint32_t bit = 1u << (static_cast<uint32_t>(type) & 31u);
 			if ((s_warned.fetch_or(bit) & bit) == 0)
 			{
-				BACKEND_WARNF("Shape geometry type %d is not supported by the PhysX backend yet; shape rejected",
+				BACKEND_WARNF("Shape geometry type %d is not supported by the PhysX backend (or its mesh handle is invalid); shape rejected",
 					static_cast<int>(type));
 			}
 		}
 
-		void ApplyShapeFlags(ShapeObj& s, Physics::ShapeFlags flags)
+		bool IsMeshRestricted(Physics::GeometryType type)
+		{
+			return type == Physics::GeometryType::TriangleMesh || type == Physics::GeometryType::Terrain;
+		}
+
+		// Triangle meshes and heightfields can only simulate on static or kinematic bodies.
+		bool MeshSimulationAllowed(const BodyObj* owner)
+		{
+			if (owner == nullptr || owner->dynamic == nullptr)
+			{
+				return true;
+			}
+			return (owner->dynamic->getRigidBodyFlags() & physx::PxRigidBodyFlag::eKINEMATIC) ? true : false;
+		}
+
+		// Pins the mesh / heightfield a geometry refers to until it is handed to a shape.
+		class GeometryPin
+		{
+		public:
+			GeometryPin() = default;
+			GeometryPin(const GeometryPin&) = delete;
+			GeometryPin& operator=(const GeometryPin&) = delete;
+
+			~GeometryPin()
+			{
+				ReleaseMesh(m_mesh);
+				ReleaseHeightField(m_field, nullptr);
+			}
+
+			// False when the geometry needs a mesh / heightfield handle that is not alive.
+			bool Acquire(const Physics::ShapeGeometry& g)
+			{
+				switch (g.type)
+				{
+				case Physics::GeometryType::ConvexMesh:
+				case Physics::GeometryType::TriangleMesh:
+					m_mesh = AcquireMesh(g.meshGeometry.mesh, g.type);
+					return m_mesh != nullptr;
+				case Physics::GeometryType::Terrain:
+					m_field = AcquireHeightField(g.heightFieldGeometry.heightField);
+					return m_field != nullptr;
+				default:
+					return true;
+				}
+			}
+
+			// Transfers the references to the shape (which must not hold any).
+			void CommitTo(ShapeObj& shape)
+			{
+				shape.mesh = m_mesh;
+				shape.heightField = m_field;
+				if (m_field != nullptr)
+				{
+					LinkHeightFieldShape(m_field, &shape);
+				}
+				m_mesh = nullptr;
+				m_field = nullptr;
+			}
+
+		private:
+			MeshObj* m_mesh = nullptr;
+			HeightFieldObj* m_field = nullptr;
+		};
+
+		// meshSimulationAllowed: whether the owning body lets triangle mesh / heightfield shapes simulate.
+		void ApplyShapeFlags(ShapeObj& s, Physics::ShapeFlags flags, bool meshSimulationAllowed)
 		{
 			s.flags = flags;
-			const bool trigger = (flags & Physics::ShapeFlags::Trigger) != Physics::ShapeFlags::None;
+			const bool restricted = IsMeshRestricted(s.geometry.type);
+			bool trigger = (flags & Physics::ShapeFlags::Trigger) != Physics::ShapeFlags::None;
 			const bool query = (flags & Physics::ShapeFlags::SceneQuery) != Physics::ShapeFlags::None;
+			if (trigger && restricted)
+			{
+				BACKEND_WARNF("Triangle mesh / heightfield shapes cannot be triggers; trigger flag ignored");
+				trigger = false;
+			}
+			const bool wantSimulation = !trigger && (!restricted || meshSimulationAllowed);
+			if (restricted && !trigger && !meshSimulationAllowed)
+			{
+				static std::atomic<bool> s_warned{ false };
+				if (!s_warned.exchange(true))
+				{
+					BACKEND_WARNF("Triangle mesh / heightfield shapes cannot simulate on a non-kinematic dynamic body; they stay scene-query only");
+				}
+			}
 
 			const physx::PxShapeFlags cur = s.shape->getFlags();
 			const bool isTrigger = cur & physx::PxShapeFlag::eTRIGGER_SHAPE;
@@ -96,9 +227,9 @@ namespace backend::pxw
 				{
 					s.shape->setFlag(physx::PxShapeFlag::eTRIGGER_SHAPE, false);
 				}
-				if (!isSim)
+				if (isSim != wantSimulation)
 				{
-					s.shape->setFlag(physx::PxShapeFlag::eSIMULATION_SHAPE, true);
+					s.shape->setFlag(physx::PxShapeFlag::eSIMULATION_SHAPE, wantSimulation);
 				}
 			}
 			if (query != isQuery)
@@ -167,8 +298,9 @@ namespace backend::pxw
 				return;
 			}
 
+			GeometryPin pin;
 			GeometryBuilder builder;
-			const physx::PxGeometry* geometry = builder.Build(cmd.geom);
+			const physx::PxGeometry* geometry = pin.Acquire(cmd.geom) ? builder.Build(cmd.geom) : nullptr;
 			if (geometry == nullptr)
 			{
 				WarnUnsupportedGeometry(cmd.geom.type);
@@ -197,7 +329,8 @@ namespace backend::pxw
 				return;
 			}
 			shape->shape->userData = shape;
-			ApplyShapeFlags(*shape, cmd.flags);
+			pin.CommitTo(*shape);
+			ApplyShapeFlags(*shape, cmd.flags, true);
 			shape->shape->setSimulationFilterData(EncodeFilter(shape->filter));
 			shape->shape->setQueryFilterData(EncodeFilter(shape->filter));
 
@@ -250,7 +383,8 @@ namespace backend::pxw
 			Lock lock(Target{ Kind::Shape, sdkObject, ctx.body });
 			if (lock)
 			{
-				ApplyShapeFlags(*lock.get<ShapeObj>(), flags);
+				ShapeObj* shape = lock.get<ShapeObj>();
+				ApplyShapeFlags(*shape, flags, MeshSimulationAllowed(shape->owner));
 			}
 		}
 
@@ -362,8 +496,9 @@ namespace backend::pxw
 				return;
 			}
 			ShapeObj* shape = lock.get<ShapeObj>();
+			GeometryPin pin;
 			GeometryBuilder builder;
-			const physx::PxGeometry* px = builder.Build(geom);
+			const physx::PxGeometry* px = pin.Acquire(geom) ? builder.Build(geom) : nullptr;
 			if (px == nullptr || geom.type != shape->geometry.type)
 			{
 				// PhysX cannot swap the geometry type of an existing shape; Unity recreates the shape instead.
@@ -372,6 +507,9 @@ namespace backend::pxw
 			}
 			shape->shape->setGeometry(*px);
 			shape->geometry = geom;
+			// The new references are pinned first, so a mesh shared by old and new geometry never drops to zero.
+			ReleaseShapeGeometryRefs(*shape);
+			pin.CommitTo(*shape);
 		}
 
 		void GetWorldBounds(Handle sdkObject, const Context& ctx, Command& c)
@@ -430,6 +568,31 @@ namespace backend::pxw
 			{
 				RefilterIgnoreIds(id, id);
 			}
+		}
+	}
+
+	void ReapplyShapeFlags(ShapeObj& shape, const BodyObj* owner)
+	{
+		ApplyShapeFlags(shape, shape.flags, MeshSimulationAllowed(owner));
+	}
+
+	void UpdateMeshShapeSimulation(BodyObj& body, bool kinematic)
+	{
+		for (ShapeObj* shape : body.shapes)
+		{
+			if (IsMeshRestricted(shape->geometry.type))
+			{
+				ApplyShapeFlags(*shape, shape->flags, kinematic);
+			}
+		}
+	}
+
+	void RefreshShapeGeometry(ShapeObj& shape)
+	{
+		GeometryBuilder builder;
+		if (const physx::PxGeometry* geometry = builder.Build(shape.geometry))
+		{
+			shape.shape->setGeometry(*geometry);
 		}
 	}
 

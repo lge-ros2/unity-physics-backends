@@ -2,6 +2,8 @@
 
 #include "core/Dispatch.h"
 #include "physx/common/PhysXSdk.h"
+#include "physx/common/PxCookingBackend.h"
+#include "physx/common/PxMesh.h"
 #include "physx/common/PxFilter.h"
 #include "physx/common/PxObjects.h"
 
@@ -376,6 +378,7 @@ namespace backend
 		pxw::RegisterBodyHandlers();
 		pxw::RegisterShapeHandlers();
 		pxw::RegisterQueryHandlers();
+		pxw::RegisterMeshHandlers();
 	}
 
 	void PhysXWorldOnSdkInitialized(uint16_t engineObjectIdOffset)
@@ -402,6 +405,8 @@ namespace backend
 				DestroyShapeLocked(lock.handle(), lock.get<ShapeObj>());
 			}
 		}
+		ReleaseAllMeshes();
+		cooking::Shutdown();
 		ReleaseAllMaterials();
 		ClearIgnoredPairs();
 	}

@@ -30,7 +30,9 @@ namespace backend::pxw
 		World,
 		Body,
 		Shape,
-		Material
+		Material,
+		Mesh,
+		HeightField
 	};
 
 	// One lock domain: a world, or the "loose" domain for shapes and materials that belong to no world.
@@ -41,6 +43,8 @@ namespace backend::pxw
 
 	struct BodyObj;
 	struct ShapeObj;
+	struct MeshObj;
+	struct HeightFieldObj;
 
 	struct WorldObj
 	{
@@ -81,6 +85,8 @@ namespace backend::pxw
 		BodyObj* owner = nullptr;
 		void* userData = nullptr;
 		Physics::ShapeGeometry geometry = {};
+		MeshObj* mesh = nullptr; // pinned convex / triangle mesh (geometry.meshGeometry.mesh)
+		HeightFieldObj* heightField = nullptr; // pinned heightfield (geometry.heightFieldGeometry.heightField)
 		Physics::ShapeFlags flags = Physics::ShapeFlags::None;
 		Physics::FilterData filter;
 	};
@@ -160,6 +166,14 @@ namespace backend::pxw
 
 	// Pushes BodyFlags (gravity / kinematic / simulated) and the CCD mode onto the PhysX actor.
 	void ApplyBodyFlags(BodyObj& body, Physics::BodyFlags flags);
+
+	// Triangle mesh / heightfield shapes can only simulate on static or kinematic bodies; elsewhere they stay query-only.
+	// Re-evaluates the shape's PhysX flags as if it were owned by owner (null = loose shape).
+	void ReapplyShapeFlags(ShapeObj& shape, const BodyObj* owner);
+	// Re-evaluates the mesh-restricted shapes of a body that is (about to be) kinematic or dynamic.
+	void UpdateMeshShapeSimulation(BodyObj& body, bool kinematic);
+	// Pushes the shape's stored geometry into PhysX again (after a heightfield was modified).
+	void RefreshShapeGeometry(ShapeObj& shape);
 
 	MaterialObj* DefaultMaterial();
 	bool ImprovedPatchFrictionEnabled();
