@@ -147,8 +147,8 @@ namespace backend
 				case World::CreateBody:
 				{
 					auto& v = static_cast<WorldData::CreateBody&>(c);
-					std::snprintf(out, size, "mass=%g linearDamping=%g angularDamping=%g isStatic=%d",
-						v.mass, v.linearDamping, v.angularDamping, v.isStatic);
+					std::snprintf(out, size, "mass=%g linearDamping=%g angularDamping=%g isStatic=%d pos=(%g,%g,%g)",
+						v.mass, v.linearDamping, v.angularDamping, v.isStatic, v.pose.pos.x, v.pose.pos.y, v.pose.pos.z);
 					break;
 				}
 				default: break;
@@ -161,6 +161,19 @@ namespace backend
 				case Body::SetMass:
 					std::snprintf(out, size, "value=%g", static_cast<BodyData::SetMass&>(c).value);
 					break;
+				case Body::SetPose:
+				{
+					auto& v = static_cast<BodyData::SetPose&>(c);
+					std::snprintf(out, size, "pos=(%g,%g,%g) awake=%d", v.value.pos.x, v.value.pos.y, v.value.pos.z, v.awake);
+					break;
+				}
+				case Body::AttachShape:
+				{
+					auto& v = static_cast<BodyData::AttachShape&>(c);
+					std::snprintf(out, size, "pos=(%g,%g,%g) forceLocalPose=%d", v.pose.pos.x, v.pose.pos.y, v.pose.pos.z,
+						v.forceLocalPose);
+					break;
+				}
 				case Body::SetDamping:
 				{
 					auto& v = static_cast<BodyData::SetDamping&>(c);
@@ -193,6 +206,11 @@ namespace backend
 				if (static_cast<Shape>(id) == Shape::SetContactOffset)
 				{
 					std::snprintf(out, size, "value=%g", static_cast<ShapeData::SetContactOffset&>(c).value);
+				}
+				else if (static_cast<Shape>(id) == Shape::SetPose)
+				{
+					auto& v = static_cast<ShapeData::SetPose&>(c).value;
+					std::snprintf(out, size, "pos=(%g,%g,%g)", v.pos.x, v.pos.y, v.pos.z);
 				}
 			}
 		}

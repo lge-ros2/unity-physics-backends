@@ -176,8 +176,7 @@ namespace backend::pxw
 			auto* body = lock.get<BodyObj>(0);
 			auto* shape = lock.get<ShapeObj>(1);
 
-			// The pose is used as the shape's pose relative to the actor regardless of body type (forceLocalPose).
-			shape->shape->setLocalPose(ToPx(cmd.pose));
+			shape->shape->setLocalPose(ToLocalShapePose(body, cmd.pose, cmd.forceLocalPose));
 			if (shape->owner == body)
 			{
 				return;

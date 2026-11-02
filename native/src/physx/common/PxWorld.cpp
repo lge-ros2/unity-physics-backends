@@ -283,6 +283,9 @@ namespace backend::pxw
 
 			world->bodies.push_back(body);
 			Register(body, Kind::Body, body, world->state);
+			// Unity 6000.6.7f1 never sends AddActorsToScene for plain bodies, so they join the scene here.
+			world->scene->addActor(*body->actor);
+			body->inScene = true;
 			cmd.outBody = body;
 		}
 

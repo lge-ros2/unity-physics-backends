@@ -171,6 +171,13 @@ namespace backend::pxw
 	inline physx::PxVec3 ToPx(const Physics::Vec3& v) { return physx::PxVec3(v.x, v.y, v.z); }
 	inline Physics::Vec3 FromPx(const physx::PxVec3& v) { return Physics::Vec3(v.x, v.y, v.z); }
 
+	// Unity hands shapes of static bodies a world pose (unless forceLocalPose); PhysX wants it relative to the actor.
+	inline physx::PxTransform ToLocalShapePose(const BodyObj* owner, const Physics::Pose& pose, bool forceLocal)
+	{
+		const physx::PxTransform p = ToPx(pose);
+		return (owner != nullptr && owner->isStatic && !forceLocal) ? owner->actor->getGlobalPose().transformInv(p) : p;
+	}
+
 	// ---- shared helpers implemented across the module ----
 
 	// Handlers that own the destruction order; callers hold the owning domain.

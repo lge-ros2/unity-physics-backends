@@ -443,7 +443,15 @@ namespace backend::pxw
 		void GetLocalPose(Handle sdkObject, const Context& ctx, Command& c)
 		{
 			Lock lock(Target{ Kind::Shape, sdkObject, ctx.body });
-			static_cast<sd::GetLocalPose&>(c).value = lock ? FromPx(lock.get<ShapeObj>()->shape->getLocalPose()) : Physics::Pose();
+			if (!lock)
+			{
+				static_cast<sd::GetLocalPose&>(c).value = Physics::Pose();
+				return;
+			}
+			// Static-body shapes are exchanged as world poses (see ToLocalShapePose).
+			const ShapeObj* shape = lock.get<ShapeObj>();
+			const bool world = shape->owner != nullptr && shape->owner->isStatic;
+			static_cast<sd::GetLocalPose&>(c).value = FromPx(world ? ShapeWorldPose(*shape) : shape->shape->getLocalPose());
 		}
 
 		void GetPose(Handle sdkObject, const Context& ctx, Command& c)
@@ -458,7 +466,8 @@ namespace backend::pxw
 			Lock lock(Target{ Kind::Shape, sdkObject, ctx.body });
 			if (lock)
 			{
-				lock.get<ShapeObj>()->shape->setLocalPose(ToPx(pose));
+				ShapeObj* shape = lock.get<ShapeObj>();
+				shape->shape->setLocalPose(ToLocalShapePose(shape->owner, pose, false));
 			}
 		}
 
