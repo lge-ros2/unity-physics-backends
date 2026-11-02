@@ -19,6 +19,7 @@ add_library(PhysX5Backend SHARED
 	src/PluginMain.cpp
 	src/Exports.cpp
 	src/core/Dispatch.cpp
+	src/core/CommandTrace.cpp
 	src/core/StubWorld.cpp)
 
 if (PHYSX5_LINK_PHYSX)

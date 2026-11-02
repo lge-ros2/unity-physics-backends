@@ -43,6 +43,10 @@ native/scripts/sync-unity-headers.sh --check   # compare vendored Unity headers 
 
 Set `-DPHYSX5_DEV_INSTALL_DIR=<project>/Assets/Plugins/PhysX5Backend/linux` to install straight into a Unity project. Restart the editor after replacing the library.
 
+## Trace
+
+Start the editor (or player) with `PHYSX5_BACKEND_TRACE=1` to log every backend command with its name, target handles and, for known `Set*`/`Create*` commands, its input values. The name tables are generated from the vendored Unity headers by `native/scripts/gen-command-names.py`.
+
 ## License
 
 MIT. Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

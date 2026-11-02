@@ -1,5 +1,6 @@
 #include "Dispatch.h"
 #include "BackendIds.h"
+#include "CommandTrace.h"
 
 #include <atomic>
 #include <cstdarg>
@@ -85,22 +86,6 @@ namespace backend
 		{
 			return &T::DefaultHandler;
 		}
-
-		const char* CategoryName(uint32_t mask)
-		{
-			switch (mask)
-			{
-			case kSDKFunctionMask: return "SDK";
-			case kWorldFunctionMask: return "World";
-			case kBodyFunctionMask: return "Body";
-			case kShapeFunctionMask: return "Shape";
-			case kQueryFunctionMask: return "Query";
-			case kJointFunctionMask: return "Joint";
-			case kArticulationFunctionMask: return "Articulation";
-			case kPhysXExtensionMask: return "PhysXExtension";
-			default: return "Unknown";
-			}
-		}
 	}
 
 	void SetLogInterface(IUnityLog* log)
@@ -161,8 +146,7 @@ namespace backend
 
 		if (g_trace.load(std::memory_order_relaxed))
 		{
-			LogFormatted(kUnityLogTypeLog, __FILE__, __LINE__,
-				"%scmd category=%s(%u) id=%zu", kLogPrefix, CategoryName(commandType), commandType >> kMaskOffsetSize, cmdId);
+			TraceCommand(sdkObject, ctx, commandType, cmdId, c);
 		}
 
 		switch (commandType)
