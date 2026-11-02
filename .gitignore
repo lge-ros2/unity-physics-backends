@@ -11,6 +11,7 @@ tests/BackendTestProject/Logs/
 tests/BackendTestProject/UserSettings/
 tests/BackendTestProject/obj/
 tests/BackendTestProject/Assets/Plugins/PhysX5Backend/
+tests/BackendTestProject/Assets/Plugins/PhysX5Backend.meta
 tests/BackendTestProject/*.csproj
 tests/BackendTestProject/*.sln
 tests/BackendTestProject/*.slnx
