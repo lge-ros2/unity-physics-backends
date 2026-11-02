@@ -16,6 +16,9 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 		private const string MenuRoot = "Tools/Physics Backend/";
 		private const string MenuPhysX4 = MenuRoot + "PhysX 4 (Built-in)";
 		private const string MenuPhysX5 = MenuRoot + "PhysX 5";
+		private const string MenuPhysX4Ref = MenuRoot + "PhysX 4 Ref (dev)";
+		// Development-only reference backend (PhysX 4.1 built from the same glue); not shipped in this package.
+		private const uint PhysX4RefIntegrationId = 0x4C505834;
 		private const string MenuLogInfo = MenuRoot + "Log Backend Info";
 		private const string MenuReinstall = MenuRoot + "Reinstall Native Plugin";
 
@@ -47,6 +50,21 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 				id == PhysicsBackendInfo.IntegrationId;
 			Menu.SetChecked(MenuPhysX5, isCurrent);
 			return PhysicsBackendInfo.IsPhysX5Registered;
+		}
+
+		[MenuItem(MenuPhysX4Ref, false, 102)]
+		private static void SelectPhysX4Ref()
+		{
+			SelectBackend(PhysX4RefIntegrationId, "PhysX 4 Ref");
+		}
+
+		[MenuItem(MenuPhysX4Ref, true)]
+		private static bool ValidateSelectPhysX4Ref()
+		{
+			var isCurrent = PhysicsBackendSettings.TryGetCurrentBackendId(out var id) &&
+				id == PhysX4RefIntegrationId;
+			Menu.SetChecked(MenuPhysX4Ref, isCurrent);
+			return PhysicsBackendInfo.IsRegistered(PhysX4RefIntegrationId);
 		}
 
 		[MenuItem(MenuLogInfo, false, 200)]
