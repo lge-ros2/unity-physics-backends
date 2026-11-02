@@ -9,6 +9,8 @@
 
 These headers are provided unmodified and are used only to build plugins that run inside Unity.
 
-## NVIDIA PhysX (planned)
+## NVIDIA PhysX 5.6.1
 
-PhysX 5.x (BSD-3-Clause, Copyright (c) NVIDIA Corporation) will be added when the PhysX integration lands. This section will be updated at that time.
+- Location: `native/third_party/PhysX` (git submodule, tag `107.3-physx-5.6.1`), statically linked into `libPhysX5Backend.so`
+- Copyright (c) NVIDIA Corporation
+- License: BSD-3-Clause (see `native/third_party/PhysX/LICENSE.md`)

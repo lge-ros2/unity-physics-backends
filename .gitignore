@@ -5,15 +5,15 @@ build/
 *.a
 
 # Test Unity project
-tests/UnityProject/Library/
-tests/UnityProject/Temp/
-tests/UnityProject/Logs/
-tests/UnityProject/UserSettings/
-tests/UnityProject/obj/
-tests/UnityProject/Assets/Plugins/PhysX5Backend/
-tests/UnityProject/*.csproj
-tests/UnityProject/*.sln
-tests/UnityProject/*.slnx
+tests/BackendTestProject/Library/
+tests/BackendTestProject/Temp/
+tests/BackendTestProject/Logs/
+tests/BackendTestProject/UserSettings/
+tests/BackendTestProject/obj/
+tests/BackendTestProject/Assets/Plugins/PhysX5Backend/
+tests/BackendTestProject/*.csproj
+tests/BackendTestProject/*.sln
+tests/BackendTestProject/*.slnx
 
 # Editor
 .vscode/

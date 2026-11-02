@@ -2,7 +2,7 @@
 
 Native physics backends for Unity's GameObject physics, built on the Physics Backend Plugin API (`IUnityPhysicsBackendSystem`, Unity 6.6+). `Rigidbody`, `ArticulationBody`, and `Collider` stay as they are; only the engine underneath changes.
 
-Status: **scaffold**. The `PhysX 5` backend currently registers itself and answers every command with a stub, so Unity can select it, but nothing is simulated yet.
+Status: **scaffold**. The `PhysX 5` backend registers itself, initializes PhysX 5.6.1 (`PxFoundation`/`PxPhysics`) and answers every command with a stub, so Unity can select it, but nothing is simulated yet.
 
 ## Layout
 
@@ -10,7 +10,7 @@ Status: **scaffold**. The `PhysX 5` backend currently registers itself and answe
 |---|---|
 | `native/` | C++ backend (CMake). Output: `libPhysX5Backend.so` |
 | `packages/com.lge-ros2.physics-backend.physx5/` | UPM package: runtime info API, editor installer, backend switch menu, build selector |
-| `tests/UnityProject/` | Minimal Unity project that references the package via `file:` |
+| `tests/BackendTestProject/` | Minimal Unity project that references the package via `file:` |
 
 ## Install (Unity 6000.6.3f1 or newer, Linux x86_64)
 
@@ -31,7 +31,10 @@ A backend inside a UPM package is not selectable by Unity (known issue), which i
 
 ## Build native library
 
+PhysX 5.6.1 is a git submodule (CPU only, linked statically). The first build compiles it and takes a few minutes.
+
 ```bash
+git submodule update --init --depth 1 native/third_party/PhysX
 cmake -S native -B native/build
 cmake --build native/build
 cmake --install native/build   # -> packages/.../Plugins~/linux/

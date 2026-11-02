@@ -4,6 +4,10 @@
 
 #include "PhysicsGeneralCommandData.h"
 
+#ifdef PHYSX5_LINK_PHYSX
+#include "physx/PhysXSdk.h"
+#endif
+
 #include <atomic>
 #include <cstdio>
 
@@ -13,7 +17,18 @@ namespace
 
 	void InitializeSdkHandler(Physics::SDKObjectHandle, const PhysicsCommands::Context&, PhysicsCommands::Command& c)
 	{
+#ifdef PHYSX5_LINK_PHYSX
+		static_cast<PhysicsCommands::SdkData::InitializeSdk&>(c).result = backend::physx_sdk::Initialize();
+#else
 		static_cast<PhysicsCommands::SdkData::InitializeSdk&>(c).result = true;
+#endif
+	}
+
+	void ShutdownSdkHandler(Physics::SDKObjectHandle, const PhysicsCommands::Context&, PhysicsCommands::Command&)
+	{
+#ifdef PHYSX5_LINK_PHYSX
+		backend::physx_sdk::Shutdown();
+#endif
 	}
 
 	void GetIntegrationInfoHandler(Physics::SDKObjectHandle, const PhysicsCommands::Context&, PhysicsCommands::Command& c)
@@ -52,6 +67,7 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnit
 
 	backend::RegisterStubWorldHandlers();
 	backend::Bind(PhysicsCommands::SDK::InitializeSdk, &InitializeSdkHandler);
+	backend::Bind(PhysicsCommands::SDK::ShutdownSdk, &ShutdownSdkHandler);
 	backend::Bind(PhysicsCommands::SDK::GetIntegrationInfo, &GetIntegrationInfoHandler);
 
 	auto* physicsBackend = unityInterfaces->Get<IUnityPhysicsBackendSystem>();

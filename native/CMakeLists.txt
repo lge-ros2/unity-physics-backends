@@ -13,12 +13,20 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 set(PHYSX5_DEV_INSTALL_DIR "" CACHE STRING "Optional extra install directory (e.g. a Unity project Plugins folder)")
+option(PHYSX5_LINK_PHYSX "Link the PhysX SDK (third_party/PhysX) into the backend" ON)
 
 add_library(PhysX5Backend SHARED
 	src/PluginMain.cpp
 	src/Exports.cpp
 	src/core/Dispatch.cpp
 	src/core/StubWorld.cpp)
+
+if (PHYSX5_LINK_PHYSX)
+	include(cmake/PhysXExternal.cmake)
+	target_sources(PhysX5Backend PRIVATE src/physx/PhysXSdk.cpp)
+	target_compile_definitions(PhysX5Backend PRIVATE PHYSX5_LINK_PHYSX=1)
+	target_link_libraries(PhysX5Backend PRIVATE physx_sdk_libs)
+endif()
 
 set_target_properties(PhysX5Backend PROPERTIES
 	OUTPUT_NAME PhysX5Backend
@@ -37,6 +45,7 @@ target_compile_options(PhysX5Backend PRIVATE
 # Statically link the C++ runtime and export only the Unity entry points.
 target_link_libraries(PhysX5Backend PRIVATE
 	-static-libstdc++ -static-libgcc
+	-Wl,--exclude-libs,ALL -Wl,-Bsymbolic
 	-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map
 	-Wl,--no-undefined)
 set_target_properties(PhysX5Backend PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/exports.map)

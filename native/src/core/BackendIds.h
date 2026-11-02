@@ -10,7 +10,7 @@ namespace backend
 	constexpr const char* kIntegrationName = "PhysX 5"; // must fit in char[16]
 	constexpr const char* kIntegrationDescription = "Stub PhysX 5 physics backend (no simulation)";
 	constexpr uint16_t kIntegrationVersion[3] = { 0, 1, 0 };
-	constexpr uint16_t kSdkVersion[3] = { 0, 0, 0 };
+	constexpr uint16_t kSdkVersion[3] = { 5, 6, 1 };
 	constexpr const char* kLogPrefix = "[PhysX5Backend] ";
 	constexpr const char* kTraceEnvVar = "PHYSX5_BACKEND_TRACE";
 }
