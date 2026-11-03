@@ -127,6 +127,24 @@ public static class CloisimLikeProbe
 			robot.transform.localScale = new Vector3(0.5f, 0.2f, 0.4f);
 			var rootAb = robot.AddComponent<ArticulationBody>();
 			rootAb.mass = 5f;
+			// same property sequence as CLOiSim's Import.Link.CreateArticulationBody
+			rootAb.linearVelocity = Vector3.zero;
+			rootAb.angularVelocity = Vector3.zero;
+			rootAb.useGravity = false;
+			rootAb.jointType = ArticulationJointType.FixedJoint;
+			rootAb.linearDamping = 3;
+			rootAb.angularDamping = 1;
+			rootAb.jointFriction = 0f;
+			rootAb.solverIterations = 0;
+			rootAb.solverVelocityIterations = 0;
+			rootAb.sleepThreshold = 1f;
+			rootAb.Sleep();
+			rootAb.matchAnchors = true;
+			rootAb.anchorPosition = Vector3.zero;
+			rootAb.anchorRotation = Quaternion.identity;
+			rootAb.ResetCenterOfMass();
+			rootAb.ResetInertiaTensor();
+			rootAb.useGravity = true;
 			var wheels = new ArticulationBody[2];
 			for (var i = 0; i < 2; i++)
 			{

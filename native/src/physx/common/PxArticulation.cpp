@@ -1488,7 +1488,8 @@ namespace backend::pxw
 		void GetLinkJoint(Handle sdkObject, const Context& ctx, Command& c)
 		{
 			LinkScope l(sdkObject, ctx);
-			static_cast<ald::GetLinkJoint&>(c).value = l ? l->jointHandle : nullptr;
+			// The root link has no joint; handing Unity one makes it write joint anchors against a missing parent.
+			static_cast<ald::GetLinkJoint&>(c).value = (l && l->parent != nullptr) ? l->jointHandle : nullptr;
 		}
 
 		void SetLinkFlags(Handle sdkObject, const Context& ctx, Command& c)
