@@ -21,6 +21,7 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 		private const uint PhysX4RefIntegrationId = 0x4C505834;
 		private const string MenuLogInfo = MenuRoot + "Log Backend Info";
 		private const string MenuReinstall = MenuRoot + "Reinstall Native Plugin";
+		private const string MenuRestart = MenuRoot + "Restart Editor";
 
 		[MenuItem(MenuPhysX4, false, 100)]
 		private static void SelectPhysX4()
@@ -77,6 +78,12 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 		private static void ReinstallNativePlugin()
 		{
 			NativePluginInstaller.Reinstall();
+		}
+
+		[MenuItem(MenuRestart, false, 202)]
+		private static void RestartEditor()
+		{
+			NativePluginInstaller.RestartEditor();
 		}
 
 		private static void SelectBackend(uint id, string displayName)

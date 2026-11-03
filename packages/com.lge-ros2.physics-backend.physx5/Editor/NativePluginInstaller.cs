@@ -207,24 +207,18 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 
 		private static void NotifyRestartRequired()
 		{
-			if (Application.isBatchMode)
-			{
-				Debug.Log(LogPrefix + "Native plugin updated. Restart the editor to load it.");
-				return;
-			}
+			// No modal dialog: updates happen on every package change. The new library loads on the next editor start
+			// (or via Tools/Physics Backend/Restart Editor).
+			Debug.LogWarning(LogPrefix + "Native plugin installed/updated. Restart the editor to load it " +
+				"(Tools/Physics Backend/Restart Editor).");
+		}
 
-			EditorApplication.delayCall += () =>
+		public static void RestartEditor()
+		{
+			if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
 			{
-				var restart = EditorUtility.DisplayDialog(
-					"PhysX 5 Physics Backend",
-					"The PhysX 5 native library was installed or updated.\nThe editor must be restarted to load it.",
-					"Restart Now",
-					"Later");
-				if (restart && EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
-				{
-					EditorApplication.OpenProject(Directory.GetCurrentDirectory());
-				}
-			};
+				EditorApplication.OpenProject(Directory.GetCurrentDirectory());
+			}
 		}
 
 		private static void OnRegisteringPackages(PackageRegistrationEventArgs args)
