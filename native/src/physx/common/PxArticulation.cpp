@@ -1191,8 +1191,15 @@ namespace backend::pxw
 			ArtScope a(sdkObject, ctx);
 			if (a)
 			{
-				a->positionIterations = std::min(std::max(cmd.positionIterations, 1u), 255u);
-				a->velocityIterations = std::min(std::max(cmd.velocityIterations, 1u), 255u);
+				// PhysX rejects 0 iterations; the built-in backend then keeps the previous count, so a 0 is ignored.
+				if (cmd.positionIterations > 0)
+				{
+					a->positionIterations = std::min(cmd.positionIterations, 255u);
+				}
+				if (cmd.velocityIterations > 0)
+				{
+					a->velocityIterations = std::min(cmd.velocityIterations, 255u);
+				}
 				a->art->setSolverIterationCounts(a->positionIterations, a->velocityIterations);
 			}
 		}

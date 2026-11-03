@@ -123,7 +123,7 @@ public static class CloisimLikeProbe
 			// robot-like articulation: free root + two driven revolute wheels, resting on PFloor
 			var robot = GameObject.CreatePrimitive(PrimitiveType.Cube);
 			robot.name = "ROBOT";
-			robot.transform.position = new Vector3(5f, 1f, 50f);
+			robot.transform.position = new Vector3(5f, 1f, -20f);
 			robot.transform.localScale = new Vector3(0.5f, 0.2f, 0.4f);
 			var rootAb = robot.AddComponent<ArticulationBody>();
 			rootAb.mass = 5f;
@@ -151,7 +151,7 @@ public static class CloisimLikeProbe
 				var w = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
 				w.name = "WHEEL" + i;
 				w.transform.SetParent(robot.transform, false);
-				w.transform.position = new Vector3(5f, 0.8f, 50f + (i == 0 ? 0.25f : -0.25f));
+				w.transform.position = new Vector3(5f, 0.8f, -20f + (i == 0 ? 0.25f : -0.25f));
 				w.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
 				w.transform.localScale = new Vector3(0.2f, 0.02f, 0.2f);
 				var ab = w.AddComponent<ArticulationBody>();
@@ -168,12 +168,120 @@ public static class CloisimLikeProbe
 				wheels[i] = ab;
 			}
 
+			// idle robot (wheels held at target velocity 0) with a fixed-joint caster: measures resting jitter
+			var idle = GameObject.CreatePrimitive(PrimitiveType.Cube);
+			idle.name = "IDLE";
+			idle.transform.position = new Vector3(-5f, 0.6f, -20f);
+			idle.transform.localScale = new Vector3(0.5f, 0.2f, 0.4f);
+			var idleAb = idle.AddComponent<ArticulationBody>();
+			idleAb.mass = 5f;
+			idleAb.linearDamping = 3;
+			idleAb.angularDamping = 1;
+			idleAb.solverIterations = 0;
+			idleAb.solverVelocityIterations = 0;
+			idleAb.sleepThreshold = 0f;
+			for (var i = 0; i < 2; i++)
+			{
+				var w = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+				w.name = "IWHEEL" + i;
+				w.transform.SetParent(idle.transform, false);
+				w.transform.position = new Vector3(-5f, 0.25f, -20f + (i == 0 ? 0.25f : -0.25f));
+				w.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+				w.transform.localScale = new Vector3(0.3f, 0.02f, 0.3f);
+				var ab = w.AddComponent<ArticulationBody>();
+				ab.mass = 0.5f;
+				ab.solverIterations = 0;
+				ab.solverVelocityIterations = 0;
+				ab.jointType = ArticulationJointType.RevoluteJoint;
+				ab.anchorRotation = Quaternion.identity;
+				ab.twistLock = ArticulationDofLock.FreeMotion;
+				var d = ab.xDrive;
+				d.stiffness = 0f;
+				d.damping = 100f;
+				d.forceLimit = 1000f;
+				d.targetVelocity = 0f;
+				ab.xDrive = d;
+			}
+			var caster = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+			caster.name = "CASTER";
+			caster.transform.SetParent(idle.transform, false);
+			caster.transform.position = new Vector3(-5.3f, 0.05f, -20f);
+			caster.transform.localScale = Vector3.one * 0.1f;
+			var casterAb = caster.AddComponent<ArticulationBody>();
+			casterAb.mass = 0.1f;
+			casterAb.jointType = ArticulationJointType.FixedJoint;
+
+			// links with overlapping colliders: root + child + grandchild (non-adjacent to root); CLOiSim ignores such pairs
+			ArticulationBody BuildOverlap(string name, float x, bool ignore)
+			{
+				var rootGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
+				rootGo.name = name;
+				rootGo.transform.position = new Vector3(x, 0.5f, 50f);
+				rootGo.transform.localScale = new Vector3(0.5f, 0.2f, 0.4f);
+				var rootBody = rootGo.AddComponent<ArticulationBody>();
+				rootBody.mass = 5f;
+				rootBody.sleepThreshold = 0f;
+				rootBody.solverIterations = 0;
+				rootBody.solverVelocityIterations = 0;
+				var parent = rootGo;
+				var cols = new System.Collections.Generic.List<Collider> { rootGo.GetComponent<Collider>() };
+				for (var i = 1; i <= 2; i++)
+				{
+					var c = GameObject.CreatePrimitive(PrimitiveType.Cube);
+					c.name = name + "_L" + i;
+					c.transform.SetParent(parent.transform, false);
+					c.transform.position = new Vector3(x + 0.1f * i, 0.5f, 50f);
+					c.transform.localScale = new Vector3(0.3f, 0.2f, 0.3f);
+					var cb = c.AddComponent<ArticulationBody>();
+					cb.mass = 0.5f;
+					cb.jointType = ArticulationJointType.FixedJoint;
+					cb.solverIterations = 0;
+					cb.solverVelocityIterations = 0;
+					cols.Add(c.GetComponent<Collider>());
+					parent = c;
+				}
+				if (ignore)
+				{
+					for (var i = 0; i < cols.Count; i++)
+						for (var j = i + 1; j < cols.Count; j++)
+							Physics.IgnoreCollision(cols[i], cols[j]);
+				}
+				return rootBody;
+			}
+			var ovl = BuildOverlap("OVL", -8f, false);
+			var ovlIgnored = BuildOverlap("OVLI", 8f, true);
+
 			yield return null;
 			var hit4 = Physics.Raycast(new Vector3(0f, 10f, 50f), Vector3.down, out var h4, 100f);
 			sb.AppendLine("[Probe] raycast primitive floor: hit=" + hit4 + (hit4 ? " pt=" + h4.point + " col=" + h4.collider.name : ""));
 			sb.AppendLine("[Probe] gravity=" + Physics.gravity + " simMode=" + Physics.simulationMode + " fixedDt=" + Time.fixedDeltaTime + " timeScale=" + Time.timeScale);
 
 			yield return new WaitForSeconds(3f);
+
+			// jitter metric: peak-to-peak position / peak speeds of the idle robot over 2 s
+			var tracked = new[] { idleAb, ovl, ovlIgnored };
+			var minP = new Vector3[tracked.Length];
+			var maxP = new Vector3[tracked.Length];
+			var maxLin = new float[tracked.Length];
+			var maxAng = new float[tracked.Length];
+			for (var k = 0; k < tracked.Length; k++)
+				minP[k] = maxP[k] = tracked[k].transform.position;
+			for (var t = 0f; t < 2f; t += Time.fixedDeltaTime)
+			{
+				yield return new WaitForFixedUpdate();
+				for (var k = 0; k < tracked.Length; k++)
+				{
+					var p = tracked[k].transform.position;
+					minP[k] = Vector3.Min(minP[k], p);
+					maxP[k] = Vector3.Max(maxP[k], p);
+					maxLin[k] = Mathf.Max(maxLin[k], tracked[k].linearVelocity.magnitude);
+					maxAng[k] = Mathf.Max(maxAng[k], tracked[k].angularVelocity.magnitude);
+				}
+			}
+			for (var k = 0; k < tracked.Length; k++)
+				sb.AppendLine("[Probe] " + tracked[k].name + " pos=" + tracked[k].transform.position + " p2p=" + (maxP[k] - minP[k]).ToString("F5")
+					+ " maxLin=" + maxLin[k].ToString("F4") + " maxAng=" + maxAng[k].ToString("F4")
+					+ " iters=" + tracked[k].solverIterations + "/" + tracked[k].solverVelocityIterations);
 
 			foreach (var o in new[] { box, box2, sphere, cyl, pbox, box3 })
 				sb.AppendLine("[Probe] " + o.name + " y=" + o.transform.position.y.ToString("F3") + " pos=" + o.transform.position);

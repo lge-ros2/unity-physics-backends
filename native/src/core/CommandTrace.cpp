@@ -6,6 +6,7 @@
 #include "PhysicsWorldCommandData.h"
 #include "PhysicsBodyCommandData.h"
 #include "PhysicsShapeCommandData.h"
+#include "PhysicsArticulationCommandData.h"
 
 #include <cstdio>
 
@@ -199,6 +200,14 @@ namespace backend
 					break;
 				}
 				default: break;
+				}
+			}
+			else if (commandType == kArticulationFunctionMask)
+			{
+				if (static_cast<Articulation>(id) == Articulation::SetSolverIterationsOverride)
+				{
+					auto& v = static_cast<ArticulationData::SetSolverIterationsOverride&>(c);
+					std::snprintf(out, size, "position=%u velocity=%u", v.positionIterations, v.velocityIterations);
 				}
 			}
 			else if (commandType == kShapeFunctionMask)

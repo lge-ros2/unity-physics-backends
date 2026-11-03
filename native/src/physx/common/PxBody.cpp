@@ -672,8 +672,15 @@ namespace backend::pxw
 			BodyScope b(sdkObject, ctx);
 			if (b)
 			{
-				b->positionIterations = std::min(std::max(cmd.positionIterations, 1u), 255u);
-				b->velocityIterations = std::min(std::max(cmd.velocityIterations, 1u), 255u);
+				// PhysX rejects 0 iterations; the built-in backend then keeps the previous count, so a 0 is ignored.
+				if (cmd.positionIterations > 0)
+				{
+					b->positionIterations = std::min(cmd.positionIterations, 255u);
+				}
+				if (cmd.velocityIterations > 0)
+				{
+					b->velocityIterations = std::min(cmd.velocityIterations, 255u);
+				}
 				if (b->dynamic != nullptr)
 				{
 					b->dynamic->setSolverIterationCounts(b->positionIterations, b->velocityIterations);
