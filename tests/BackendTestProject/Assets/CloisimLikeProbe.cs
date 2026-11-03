@@ -331,6 +331,15 @@ public static class CloisimLikeProbe
 					for (var i = 0; i < list.Count; i++)
 						lateSpins += " " + list[i].name.Replace("NR_", "") + "=" + nrLateSpin[r, i].ToString("F2");
 					sb.AppendLine("[Probe] NR" + (r == 0 ? "idle" : "drive") + " lateSpin(rad/s):" + lateSpins);
+					// relative rotation of each non-fixed child vs its parent link (which axis does the joint turn about?)
+					for (var i = 3; i <= 6; i++)
+					{
+						var parentAb = i % 2 == 1 ? list[0] : list[i - 1];
+						var rel = Quaternion.Inverse(parentAb.transform.rotation) * list[i].transform.rotation;
+						rel.ToAngleAxis(out var angle, out var axis);
+						sb.AppendLine("[Probe] NR" + (r == 0 ? "idle" : "drive") + " " + list[i].name + " relRot angle=" + angle.ToString("F1")
+							+ " axis=" + axis.ToString("F2") + " relPos=" + (list[i].transform.position - parentAb.transform.position).ToString("F3"));
+					}
 			}
 
 			foreach (var s in scaleTests)
