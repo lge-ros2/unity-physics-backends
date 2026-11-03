@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <unordered_map>
 
+#include <unistd.h>
+
 // Opt-in diagnostics (env BACKEND_DIAG=1): dumps every articulation once its structure has settled, then reports
 // links that move implausibly fast. Meant for chasing instability that only shows up in real scenes.
 
@@ -21,10 +23,12 @@ namespace backend::pxw
 			size_t dumpedCount = 0;
 		};
 
+		// Env BACKEND_DIAG, or a file named BACKEND_DIAG in the working directory (the project folder when launched
+		// from Unity Hub); the file is re-checked while running, so it can be created without restarting.
 		bool Enabled()
 		{
-			static const bool enabled = std::getenv("BACKEND_DIAG") != nullptr;
-			return enabled;
+			static const bool env = std::getenv("BACKEND_DIAG") != nullptr;
+			return env || access("BACKEND_DIAG", F_OK) == 0;
 		}
 
 		const char* MotionName(artic::Motion m)
@@ -117,15 +121,20 @@ namespace backend::pxw
 
 	void DiagStep(WorldObj& world)
 	{
-		if (!Enabled())
+		static unsigned long long step = 0;
+		static bool enabled = false;
+		if (step % 100 == 0)
+		{
+			enabled = Enabled();
+		}
+		++step;
+		if (!enabled)
 		{
 			return;
 		}
 
 		static std::unordered_map<const ArticulationObj*, ArtState> states;
-		static unsigned long long step = 0;
 		static int anomalyLines = 0;
-		++step;
 
 		int artIndex = 0;
 		for (const ArticulationObj* a : world.articulations)
