@@ -3,6 +3,7 @@
 #include "core/Dispatch.h"
 #include "physx/common/PhysXSdk.h"
 #include "physx/common/PxCookingBackend.h"
+#include "physx/common/PxDiag.h"
 #include "physx/common/PxEvents.h"
 #include "physx/common/PxMesh.h"
 #include "physx/common/PxFilter.h"
@@ -220,6 +221,7 @@ namespace backend::pxw
 			scene->simulate(cmd.deltaTime);
 			scene->fetchResults(true);
 			FinishStepEvents(*lock.get<WorldObj>());
+			DiagStep(*lock.get<WorldObj>());
 			cmd.ranSimulation = true;
 		}
 

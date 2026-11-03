@@ -256,7 +256,94 @@ public static class CloisimLikeProbe
 			sb.AppendLine("[Probe] raycast primitive floor: hit=" + hit4 + (hit4 ? " pt=" + h4.point + " col=" + h4.collider.name : ""));
 			sb.AppendLine("[Probe] gravity=" + Physics.gravity + " simMode=" + Physics.simulationMode + " fixedDt=" + Time.fixedDeltaTime + " timeScale=" + Time.timeScale);
 
-			yield return new WaitForSeconds(3f);
+			// scaled / rotated convex MeshColliders (imported meshes are in mm and scaled down by the transform)
+			var scaleTests = new System.Collections.Generic.List<GameObject>();
+			GameObject MakeScaled(string name, float x, Vector3 scale, Quaternion rot, float meshScale, bool articulation)
+			{
+				var cylTmp = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+				var src = cylTmp.GetComponent<MeshFilter>().sharedMesh;
+				Destroy(cylTmp);
+				var verts = src.vertices;
+				for (var i = 0; i < verts.Length; i++)
+					verts[i] *= meshScale;
+				var m = new Mesh { name = name + "_mesh", vertices = verts, triangles = src.triangles, normals = src.normals };
+				m.RecalculateBounds();
+
+				var parent = new GameObject(name);
+				parent.transform.SetPositionAndRotation(new Vector3(x, 2f, 30f), rot);
+				var child = new GameObject(name + "_col");
+				child.transform.SetParent(parent.transform, false);
+				child.transform.localScale = scale;
+				var mc = child.AddComponent<MeshCollider>();
+				mc.sharedMesh = m;
+				mc.convex = true;
+				if (articulation)
+					parent.AddComponent<ArticulationBody>();
+				else
+					parent.AddComponent<Rigidbody>();
+				scaleTests.Add(parent);
+				return parent;
+			}
+			// cylinder mesh: radius 0.5, half height 1 (mesh units) -> after scale: half extents
+			MakeScaled("SC_uniform", -8f, Vector3.one, Quaternion.identity, 1f, false);
+			MakeScaled("SC_mm", -6f, Vector3.one * 0.001f, Quaternion.identity, 1000f, false);
+			MakeScaled("SC_nonuni", -4f, new Vector3(0.4f, 0.25f, 0.6f), Quaternion.Euler(0f, 30f, 0f), 1f, false);
+			MakeScaled("SC_rotscale", -2f, new Vector3(0.4f, 0.25f, 0.6f), Quaternion.Euler(20f, 30f, 10f), 1f, false);
+			MakeScaled("SC_mm_art", 0f, Vector3.one * 0.001f, Quaternion.identity, 1000f, true);
+			MakeScaled("SC_nonuni_art", 2f, new Vector3(0.4f, 0.25f, 0.6f), Quaternion.Euler(0f, 30f, 0f), 1f, true);
+
+			// NR-like robot (CLOiSim joint conventions): peak speed per link over the first 3 s
+			var nrIdle = NrLikeRobot.Build(new Vector3(0f, 0f, 20f), 0f);
+			var nrDrive = NrLikeRobot.Build(new Vector3(10f, 0f, 20f), 360f);
+			yield return null; // import finishes over several frames, then SpecifyPose re-enables the links
+			NrLikeRobot.EnableAll(nrIdle);
+			NrLikeRobot.EnableAll(nrDrive);
+			var nrPeak = new float[2];
+			var nrWorst = new string[2];
+			var nrLateSpin = new float[2, 16];
+			for (var t = 0f; t < 3f; t += Time.fixedDeltaTime)
+			{
+				yield return new WaitForFixedUpdate();
+				for (var r = 0; r < 2; r++)
+					foreach (var ab in r == 0 ? nrIdle : nrDrive)
+					{
+						if (t > 2f)
+						{
+							var idx = (r == 0 ? nrIdle : nrDrive).IndexOf(ab);
+							nrLateSpin[r, idx] = Mathf.Max(nrLateSpin[r, idx], ab.angularVelocity.magnitude);
+						}
+						var v = ab.linearVelocity.magnitude;
+						if (float.IsNaN(v) || v > nrPeak[r])
+						{
+							nrPeak[r] = float.IsNaN(v) ? float.PositiveInfinity : v;
+							nrWorst[r] = ab.name + "@" + t.ToString("F2");
+						}
+					}
+			}
+			for (var r = 0; r < 2; r++)
+			{
+				var list = r == 0 ? nrIdle : nrDrive;
+				sb.AppendLine("[Probe] NR" + (r == 0 ? "idle" : "drive") + " base=" + list[0].transform.position + " peakSpeed="
+					+ nrPeak[r].ToString("F3") + " (" + nrWorst[r] + ")" + " dofs=" + list[0].dofCount
+					+ " bumperPos=" + (list[1].dofCount > 0 ? list[1].jointPosition[0].ToString("F4") : "n/a")
+					+ " suspL=" + (list[3].dofCount > 0 ? list[3].jointPosition[0].ToString("F3") : "n/a"));
+					var lateSpins = "";
+					for (var i = 0; i < list.Count; i++)
+						lateSpins += " " + list[i].name.Replace("NR_", "") + "=" + nrLateSpin[r, i].ToString("F2");
+					sb.AppendLine("[Probe] NR" + (r == 0 ? "idle" : "drive") + " lateSpin(rad/s):" + lateSpins);
+			}
+
+			foreach (var s in scaleTests)
+				sb.AppendLine("[Probe] " + s.name + " y=" + s.transform.position.y.ToString("F3") + " rot=" + s.transform.rotation.eulerAngles
+					+ " ext=" + s.GetComponentInChildren<Collider>().bounds.extents);
+
+			// placing a model (ModelImporter): TeleportRoot while the articulation is simulating
+			var relBefore = wheels[0].transform.position - rootAb.transform.position;
+			rootAb.TeleportRoot(new Vector3(15f, 0.6f, -10f), Quaternion.Euler(0f, 30f, 0f));
+			yield return new WaitForSeconds(2f);
+			sb.AppendLine("[Probe] TELEPORT root=" + rootAb.transform.position + " rot=" + rootAb.transform.rotation.eulerAngles
+				+ " wheel0 rel before=" + relBefore + " after=" + (wheels[0].transform.position - rootAb.transform.position)
+				+ " rootVel=" + rootAb.linearVelocity.magnitude.ToString("F3") + " wheel0Vel=" + wheels[0].linearVelocity.magnitude.ToString("F3"));
 
 			// jitter metric: peak-to-peak position / peak speeds of the idle robot over 2 s
 			var tracked = new[] { idleAb, ovl, ovlIgnored };

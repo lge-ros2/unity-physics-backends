@@ -45,6 +45,7 @@ if (PHYSX5_LINK_PHYSX)
 		src/physx/common/PxShape.cpp
 		src/physx/common/PxQuery.cpp
 		src/physx/common/PxEvents.cpp
+		src/physx/common/PxDiag.cpp
 		src/physx/common/PxJoint.cpp
 		src/physx/common/PxMesh.cpp
 		src/physx/common/PxArticulation.cpp
