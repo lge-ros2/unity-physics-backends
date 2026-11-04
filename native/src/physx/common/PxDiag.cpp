@@ -2,10 +2,13 @@
 
 #include "core/Dispatch.h"
 #include "physx/common/PxArticulation.h"
+#include "physx/common/PxFilter.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <unordered_map>
+#include <vector>
 
 #include <unistd.h>
 
@@ -117,6 +120,126 @@ namespace backend::pxw
 				}
 			}
 		}
+
+		// Geometrically overlapping shapes on non-adjacent links, and whether the simulation filter lets them collide.
+		void DumpSelfOverlaps(const ArticulationObj& a, int artIndex)
+		{
+			struct Entry
+			{
+				size_t link = 0;
+				size_t shapeIndex = 0;
+				const ShapeObj* shape = nullptr;
+				physx::PxGeometryHolder geometry;
+				physx::PxTransform pose;
+			};
+			std::vector<Entry> entries;
+			for (size_t i = 0; i < a.links.size(); ++i)
+			{
+				const LinkObj& l = *a.links[i];
+				if (l.link == nullptr)
+				{
+					continue;
+				}
+				for (size_t s = 0; s < l.shapes.size(); ++s)
+				{
+					const ShapeObj* shape = l.shapes[s];
+					if (shape->shape == nullptr)
+					{
+						continue;
+					}
+					Entry e;
+					e.link = i;
+					e.shapeIndex = s;
+					e.shape = shape;
+					e.geometry = compat::CopyShapeGeometry(*shape->shape);
+					e.pose = l.link->getGlobalPose() * shape->shape->getLocalPose();
+					entries.push_back(e);
+				}
+			}
+
+			int colliding = 0;
+			int suppressed = 0;
+			int shown = 0;
+			for (size_t i = 0; i < entries.size(); ++i)
+			{
+				for (size_t j = i + 1; j < entries.size(); ++j)
+				{
+					const Entry& e0 = entries[i];
+					const Entry& e1 = entries[j];
+					if (e0.link == e1.link)
+					{
+						continue;
+					}
+					const LinkObj& l0 = *a.links[e0.link];
+					const LinkObj& l1 = *a.links[e1.link];
+					if (l0.parent == &l1 || l1.parent == &l0)
+					{
+						continue; // PhysX never collides adjacent links
+					}
+					physx::PxVec3 direction;
+					physx::PxF32 depth = 0.0f;
+					if (!physx::PxGeometryQuery::computePenetration(direction, depth, e0.geometry.any(), e0.pose, e1.geometry.any(), e1.pose)
+						|| depth < 1e-4f)
+					{
+						continue;
+					}
+					const Physics::FilterData& f0 = e0.shape->filter;
+					const Physics::FilterData& f1 = e1.shape->filter;
+					const bool ignored = f0.ignorePairID != Physics::FilterData::invalidIgnorePairID
+						&& f1.ignorePairID != Physics::FilterData::invalidIgnorePairID && IsPairIgnored(f0.ignorePairID, f1.ignorePairID);
+					const bool layers = !f0.hasCollisionDisabled && !f1.hasCollisionDisabled && LayersCollide(f0, f1);
+					const bool collides = layers && !ignored;
+					(collides ? colliding : suppressed)++;
+					if (shown < 40 && collides)
+					{
+						++shown;
+						BACKEND_WARNF("[diag] selfOverlap art #%d link %zu(shape %zu %s) <-> link %zu(shape %zu %s) depth=%.4f ignorePairID=(%u,%u)",
+							artIndex, e0.link, e0.shapeIndex, GeometryName(e0.shape->geometry.type), e1.link, e1.shapeIndex,
+							GeometryName(e1.shape->geometry.type), depth, static_cast<unsigned>(f0.ignorePairID),
+							static_cast<unsigned>(f1.ignorePairID));
+					}
+				}
+			}
+			BACKEND_LOGF("[diag] selfOverlap art #%d summary: %d overlapping pairs still colliding, %d suppressed (ignored/layers), shapes=%zu",
+				artIndex, colliding, suppressed, entries.size());
+		}
+
+		// Relative rotation of each non-fixed link to its parent at joint level (degrees) and its spin (rad/s).
+		void LogJointAngles(const ArticulationObj& a, int artIndex, int t)
+		{
+			char buf[640];
+			int n = std::snprintf(buf, sizeof(buf), "[diag] t=%d art #%d", t, artIndex);
+			for (size_t i = 0; i < a.links.size() && n < 600; ++i)
+			{
+				const LinkObj& l = *a.links[i];
+				if (l.link == nullptr || l.parent == nullptr || l.parent->link == nullptr || l.jointType == Physics::JointType::Fixed)
+				{
+					continue;
+				}
+				const physx::PxTransform pf = ToPx(l.parentFrame);
+				const physx::PxTransform cf = ToPx(l.childFrame);
+				physx::PxQuat r = pf.q.getConjugate() * l.parent->link->getGlobalPose().q.getConjugate() * l.link->getGlobalPose().q * cf.q;
+				if (r.w < 0.0f)
+				{
+					r = -r;
+				}
+				n += std::snprintf(buf + n, sizeof(buf) - n, " %zu:%.1fdeg/w%.0f", i, r.getAngle() * 57.29578f,
+					l.link->getAngularVelocity().magnitude());
+			}
+			BACKEND_LOGF("%s", buf);
+		}
+
+		bool HasShapes(const ArticulationObj& a)
+		{
+			for (const LinkObj* l : a.links)
+			{
+				if (!l->shapes.empty())
+				{
+					return true;
+				}
+			}
+			return false;
+		}
 	}
 
 	void DiagStep(WorldObj& world)
@@ -135,6 +258,7 @@ namespace backend::pxw
 
 		static std::unordered_map<const ArticulationObj*, ArtState> states;
 		static int anomalyLines = 0;
+		static int seriesLines = 0;
 
 		int artIndex = 0;
 		for (const ArticulationObj* a : world.articulations)
@@ -153,6 +277,12 @@ namespace backend::pxw
 			{
 				s.dumpedCount = s.linkCount;
 				Dump(*a, artIndex);
+				DumpSelfOverlaps(*a, artIndex);
+			}
+			if (s.stableSteps >= 1 && s.stableSteps <= 60 && seriesLines < 400 && HasShapes(*a))
+			{
+				++seriesLines;
+				LogJointAngles(*a, artIndex, s.stableSteps);
 			}
 
 			float worstSpeed = 0.0f;
