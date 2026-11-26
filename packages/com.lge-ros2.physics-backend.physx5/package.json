@@ -1,6 +1,6 @@
 {
 	"name": "com.lge-ros2.physics-backend.physx5",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"displayName": "PhysX 5 Physics Backend",
 	"description": "PhysX 5 physics backend for Unity 6 (Linux and Windows x86_64). Installs the native backend library into the project on first load and provides backend selection and diagnostics tools.",
 	"unity": "6000.6",
