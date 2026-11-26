@@ -53,8 +53,11 @@ public static class NrLikeRobot
 			cc.height = 0.03f;
 			wheel.mass = 0.25f;
 			// SDF axis (0,0,1) -> Unity up; free spin with velocity drive
-			MakeRevolute(wheel, ToUnity(0f, 0f, 1f), false, 0f, 0f, 10f);
+			// real NR: wheel damping 0, forceLimit 15; Motor.CheckDriveType then switches the drive to Velocity
+			MakeRevolute(wheel, ToUnity(0f, 0f, 1f), false, 0f, 0f, 0f);
 			var d = wheel.yDrive;
+			d.forceLimit = 15f;
+			d.driveType = ArticulationDriveType.Velocity;
 			d.targetVelocity = wheelTargetVelocityDeg;
 			wheel.yDrive = d;
 		}

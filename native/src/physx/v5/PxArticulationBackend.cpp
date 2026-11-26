@@ -126,18 +126,13 @@ namespace backend::artic
 			break;
 		case Physics::ArticulationMotorType::Target:
 			// Unity / PhysX 4.1 "target": drive straight to the position target, bounded by the force limit.
-			if (stiffness > 0.0f || damping > 0.0f)
-			{
-				stiffness = kRigidGain;
-				damping = 0.0f;
-			}
+			// The gains Unity sends are ignored (CLOiSim's wheels send damping 0 with the Velocity type).
+			stiffness = kRigidGain;
+			damping = 0.0f;
 			break;
 		case Physics::ArticulationMotorType::Velocity:
-			if (stiffness > 0.0f || damping > 0.0f)
-			{
-				stiffness = 0.0f;
-				damping = kRigidGain;
-			}
+			stiffness = 0.0f;
+			damping = kRigidGain;
 			break;
 		default:
 			break;
