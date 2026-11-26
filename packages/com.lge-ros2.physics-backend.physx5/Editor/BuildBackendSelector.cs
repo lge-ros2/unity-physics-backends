@@ -14,7 +14,7 @@ using UnityEngine;
 namespace Lge.PhysicsBackend.PhysX5.Editor
 {
 	// Selects the physics backend for a build via "-physicsBackend physx4|physx5" and keeps the PhysX 5 native
-	// library out of Standalone Linux builds that do not use it.
+	// library out of Standalone Linux / Windows builds that do not use it.
 	public sealed class BuildBackendSelector : IPreprocessBuildWithReport, IPostprocessBuildWithReport
 	{
 		private const string CommandLineArg = "-physicsBackend";
@@ -54,7 +54,8 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 				Debug.Log(LogPrefix + "Build physics backend set to id=" + requestedId.Value);
 			}
 
-			if (report.summary.platform != BuildTarget.StandaloneLinux64)
+			var platform = NativePlatform.ForBuildTarget(report.summary.platform);
+			if (platform == null)
 			{
 				return;
 			}
@@ -66,16 +67,16 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 
 			try
 			{
-				var importer = AssetImporter.GetAtPath(NativePluginInstaller.PluginAssetPath) as PluginImporter;
-				if (importer == null || !importer.GetCompatibleWithPlatform(BuildTarget.StandaloneLinux64))
+				var importer = AssetImporter.GetAtPath(platform.AssetPath) as PluginImporter;
+				if (importer == null || !importer.GetCompatibleWithPlatform(platform.Target))
 				{
 					return;
 				}
 
 				File.WriteAllText(MarkerPath, string.Empty);
-				importer.SetCompatibleWithPlatform(BuildTarget.StandaloneLinux64, false);
+				importer.SetCompatibleWithPlatform(platform.Target, false);
 				importer.SaveAndReimport();
-				Debug.Log(LogPrefix + "Excluded " + PhysicsBackendInfo.NativeLibraryFileName + " from this build (PhysX 5 not selected).");
+				Debug.Log(LogPrefix + "Excluded " + platform.FileName + " from this build (PhysX 5 not selected).");
 			}
 			catch (Exception)
 			{
@@ -93,12 +94,15 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 		{
 			try
 			{
-				var importer = AssetImporter.GetAtPath(NativePluginInstaller.PluginAssetPath) as PluginImporter;
-				if (importer != null && !importer.GetCompatibleWithPlatform(BuildTarget.StandaloneLinux64))
+				foreach (var platform in NativePlatform.All)
 				{
-					importer.SetCompatibleWithPlatform(BuildTarget.StandaloneLinux64, true);
-					importer.SaveAndReimport();
-					Debug.Log(LogPrefix + "Restored " + PhysicsBackendInfo.NativeLibraryFileName + " Standalone Linux compatibility.");
+					var importer = AssetImporter.GetAtPath(platform.AssetPath) as PluginImporter;
+					if (importer != null && !importer.GetCompatibleWithPlatform(platform.Target))
+					{
+						importer.SetCompatibleWithPlatform(platform.Target, true);
+						importer.SaveAndReimport();
+						Debug.Log(LogPrefix + "Restored " + platform.FileName + " " + platform.Target + " compatibility.");
+					}
 				}
 			}
 			finally

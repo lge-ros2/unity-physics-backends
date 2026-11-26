@@ -22,15 +22,13 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 	{
 		public const string PackageName = "com.lge-ros2.physics-backend.physx5";
 		public const string PluginRootFolder = "Assets/Plugins/PhysX5Backend";
-		public const string PluginFolder = PluginRootFolder + "/linux";
-		public const string PluginAssetPath = PluginFolder + "/" + PhysicsBackendInfo.NativeLibraryFileName;
 
 		private const string VersionFileName = "VERSION";
 		private const string LogPrefix = "[PhysicsBackend] ";
 
 		static NativePluginInstaller()
 		{
-			if (!IsLinuxEditor)
+			if (NativePlatform.Current == null)
 			{
 				return;
 			}
@@ -41,8 +39,6 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 			EditorApplication.delayCall += () => Install(false);
 		}
 
-		private static bool IsLinuxEditor => Application.platform == RuntimePlatform.LinuxEditor;
-
 		public static void Reinstall()
 		{
 			Install(true);
@@ -50,7 +46,8 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 
 		private static void Install(bool force)
 		{
-			if (!IsLinuxEditor || BuildPipeline.isBuildingPlayer)
+			var current = NativePlatform.Current;
+			if (current == null || BuildPipeline.isBuildingPlayer)
 			{
 				return;
 			}
@@ -62,17 +59,37 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 				return;
 			}
 
-			var source = Path.Combine(package.resolvedPath, "Plugins~", "linux", PhysicsBackendInfo.NativeLibraryFileName);
+			// Every flavor shipped in the package is installed: the editor loads its own one, the other one is only
+			// needed to build a standalone player for the other OS.
+			var currentUpdated = false;
+			foreach (var platform in NativePlatform.All)
+			{
+				var updated = InstallPlatform(platform, package, force, platform == current);
+				currentUpdated |= updated && platform == current;
+			}
+
+			if (currentUpdated)
+			{
+				NotifyRestartRequired();
+			}
+		}
+
+		private static bool InstallPlatform(NativePlatform platform, PackageInfo package, bool force, bool isEditorPlatform)
+		{
+			var source = Path.Combine(package.resolvedPath, "Plugins~", platform.Folder, platform.FileName);
 			if (!File.Exists(source))
 			{
-				Debug.LogWarning(LogPrefix + PhysicsBackendInfo.NativeLibraryFileName + " not found in package (" + source +
-					"); skipping native plugin install.");
-				return;
+				if (isEditorPlatform)
+				{
+					Debug.LogWarning(LogPrefix + platform.FileName + " not found in package (" + source +
+						"); skipping native plugin install.");
+				}
+				return false;
 			}
 
 			var projectRoot = Directory.GetCurrentDirectory();
-			var targetDir = Path.Combine(projectRoot, PluginFolder);
-			var target = Path.Combine(targetDir, PhysicsBackendInfo.NativeLibraryFileName);
+			var targetDir = Path.Combine(projectRoot, platform.AssetFolder);
+			var target = Path.Combine(targetDir, platform.FileName);
 			var versionFile = Path.Combine(targetDir, VersionFileName);
 
 			var updated = false;
@@ -88,35 +105,32 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 					File.WriteAllText(versionFile, "version=" + package.version + "\nsha256=" + sourceHash + "\n");
 					updated = true;
 
-					Debug.Log(LogPrefix + "Installed " + PhysicsBackendInfo.NativeLibraryFileName + " " + package.version +
-						" to " + PluginFolder);
+					Debug.Log(LogPrefix + "Installed " + platform.FileName + " " + package.version + " to " + platform.AssetFolder);
 					if (firstInstall)
 					{
 						Debug.Log(LogPrefix + "Recommended: add '" + PluginRootFolder + "/' to your .gitignore.");
 					}
 				}
+				CleanupStaleFiles(targetDir);
 			}
 			catch (Exception e)
 			{
-				Debug.LogError(LogPrefix + "Native plugin install failed: " + e);
-				return;
+				Debug.LogError(LogPrefix + "Native plugin install failed (" + platform.Folder + "): " + e);
+				return false;
 			}
 
 			if (updated)
 			{
-				AssetDatabase.ImportAsset(PluginRootFolder, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ImportRecursive);
+				AssetDatabase.ImportAsset(platform.AssetFolder, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ImportRecursive);
 			}
 
-			var importerChanged = ConfigureImporter();
+			var importerChanged = ConfigureImporter(platform);
+			if (importerChanged && !updated)
+			{
+				Debug.Log(LogPrefix + "Plugin importer settings updated (" + platform.Folder + ").");
+			}
 
-			if (updated)
-			{
-				NotifyRestartRequired();
-			}
-			else if (importerChanged)
-			{
-				Debug.Log(LogPrefix + "Plugin importer settings updated.");
-			}
+			return updated;
 		}
 
 		private static bool IsUpToDate(string target, string versionFile, string source, string sourceHash)
@@ -135,17 +149,28 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 				new FileInfo(target).Length == new FileInfo(source).Length;
 		}
 
-		// Never overwrite the target in place: a loaded .so that is rewritten crashes the editor (SIGSEGV).
-		// Copy to a temp file in the same folder, remove the old file (its inode stays mapped) and move the new one in.
+		// Never overwrite the target in place: a loaded library that is rewritten crashes the editor (SIGSEGV on Linux).
+		// Copy to a temp file in the same folder, get the old file out of the way and move the new one in. Linux can
+		// unlink a mapped file; Windows refuses to delete a loaded DLL but allows renaming it, so it is moved aside
+		// to a hidden name (leading dot: ignored by the AssetDatabase) and removed by CleanupStaleFiles later.
 		private static void ReplaceFile(string source, string target)
 		{
-			var tempFile = Path.Combine(Path.GetDirectoryName(target), "." + Path.GetFileName(target) + "." + Guid.NewGuid().ToString("N") + ".tmp");
+			var folder = Path.GetDirectoryName(target);
+			var tempFile = Path.Combine(folder, "." + Path.GetFileName(target) + "." + Guid.NewGuid().ToString("N") + ".tmp");
 			try
 			{
 				File.Copy(source, tempFile, true);
 				if (File.Exists(target))
 				{
-					File.Delete(target);
+					try
+					{
+						File.Delete(target);
+					}
+					catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+					{
+						var aside = Path.Combine(folder, "." + Path.GetFileName(target) + "." + Guid.NewGuid().ToString("N") + ".old");
+						File.Move(target, aside);
+					}
 				}
 				File.Move(tempFile, target);
 			}
@@ -154,6 +179,27 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 				if (File.Exists(tempFile))
 				{
 					File.Delete(tempFile);
+				}
+			}
+		}
+
+		// Leftovers of ReplaceFile: files that were still loaded back then, removable once the editor restarted.
+		private static void CleanupStaleFiles(string folder)
+		{
+			if (!Directory.Exists(folder))
+			{
+				return;
+			}
+
+			foreach (var file in Directory.GetFiles(folder, ".*.old"))
+			{
+				try
+				{
+					File.Delete(file);
+				}
+				catch (Exception)
+				{
+					// Still loaded by this editor session; try again next time.
 				}
 			}
 		}
@@ -173,9 +219,9 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 			}
 		}
 
-		private static bool ConfigureImporter()
+		private static bool ConfigureImporter(NativePlatform platform)
 		{
-			var importer = AssetImporter.GetAtPath(PluginAssetPath) as PluginImporter;
+			var importer = AssetImporter.GetAtPath(platform.AssetPath) as PluginImporter;
 			if (importer == null)
 			{
 				return false;
@@ -184,11 +230,11 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 			var matches =
 				!importer.GetCompatibleWithAnyPlatform() &&
 				importer.GetCompatibleWithEditor() &&
-				importer.GetCompatibleWithPlatform(BuildTarget.StandaloneLinux64) &&
+				importer.GetCompatibleWithPlatform(platform.Target) &&
 				importer.isPreloaded &&
 				importer.GetEditorData("CPU") == "x86_64" &&
-				importer.GetEditorData("OS") == "Linux" &&
-				importer.GetPlatformData(BuildTarget.StandaloneLinux64, "CPU") == "x86_64";
+				importer.GetEditorData("OS") == platform.EditorOs &&
+				importer.GetPlatformData(platform.Target, "CPU") == "x86_64";
 			if (matches)
 			{
 				return false;
@@ -197,9 +243,9 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 			importer.SetCompatibleWithAnyPlatform(false);
 			importer.SetCompatibleWithEditor(true);
 			importer.SetEditorData("CPU", "x86_64");
-			importer.SetEditorData("OS", "Linux");
-			importer.SetCompatibleWithPlatform(BuildTarget.StandaloneLinux64, true);
-			importer.SetPlatformData(BuildTarget.StandaloneLinux64, "CPU", "x86_64");
+			importer.SetEditorData("OS", platform.EditorOs);
+			importer.SetCompatibleWithPlatform(platform.Target, true);
+			importer.SetPlatformData(platform.Target, "CPU", "x86_64");
 			importer.isPreloaded = true;
 			importer.SaveAndReimport();
 			return true;
@@ -231,12 +277,15 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 			try
 			{
 				var projectRoot = Directory.GetCurrentDirectory();
-				var folder = Path.Combine(projectRoot, PluginFolder);
-				if (Directory.Exists(folder))
+				foreach (var platform in NativePlatform.All)
 				{
-					Directory.Delete(folder, true);
+					var folder = Path.Combine(projectRoot, platform.AssetFolder);
+					if (Directory.Exists(folder))
+					{
+						Directory.Delete(folder, true);
+					}
+					DeleteIfExists(folder + ".meta");
 				}
-				DeleteIfExists(folder + ".meta");
 
 				var rootFolder = Path.Combine(projectRoot, PluginRootFolder);
 				if (Directory.Exists(rootFolder) && !Directory.EnumerateFileSystemEntries(rootFolder).Any())
@@ -245,12 +294,12 @@ namespace Lge.PhysicsBackend.PhysX5.Editor
 					DeleteIfExists(rootFolder + ".meta");
 				}
 
-				Debug.Log(LogPrefix + "Package removed; deleted " + PluginFolder);
+				Debug.Log(LogPrefix + "Package removed; deleted " + PluginRootFolder);
 				EditorApplication.delayCall += AssetDatabase.Refresh;
 			}
 			catch (Exception e)
 			{
-				Debug.LogWarning(LogPrefix + "Failed to clean up " + PluginFolder + ": " + e.Message);
+				Debug.LogWarning(LogPrefix + "Failed to clean up " + PluginRootFolder + ": " + e.Message);
 			}
 		}
 

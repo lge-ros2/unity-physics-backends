@@ -16,7 +16,6 @@ namespace Lge.PhysicsBackend.PhysX5
 	{
 		public const uint IntegrationId = 0x4C504835;
 		public const string BackendName = "PhysX 5";
-		public const string NativeLibraryFileName = "libPhysX5Backend.so";
 
 		private const string LogPrefix = "[PhysicsBackend] ";
 		private const uint InvalidIntegrationId = 0;
