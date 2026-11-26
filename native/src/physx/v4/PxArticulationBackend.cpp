@@ -184,6 +184,11 @@ namespace backend::artic
 		}
 	}
 
+	bool ReadIncomingJointForces(Articulation&, Cache&, std::vector<physx::PxVec3>&, std::vector<physx::PxVec3>&)
+	{
+		return false; // PhysX 4.1 has no incoming joint force in its articulation cache
+	}
+
 	void ComputeGravityForces(Articulation& articulation, Cache& cache)
 	{
 		articulation.commonInit();

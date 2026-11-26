@@ -4,6 +4,7 @@
 #include "core/Dispatch.h"
 #include "physx/common/PhysXSdk.h"
 #include "physx/common/PxFilter.h"
+#include "physx/common/PxJoint.h"
 
 #include "PhysicsWorldCommandData.h"
 
@@ -32,6 +33,8 @@ namespace backend::pxw
 	{
 		constexpr float kUnlimited = 1e20f;
 		constexpr float kPi = 3.14159265358979f;
+		// Gain of the "target" / "velocity" drives (PhysX 4.1 treats them as rigid; see the v5 SetDrive).
+		constexpr float kRigidDriveGain = 1e25f;
 
 		void WarnOnce(std::atomic<bool>& flag, const char* what)
 		{
@@ -205,13 +208,11 @@ namespace backend::pxw
 			return a.cache;
 		}
 
-		// Link DOF layout: (link, first flat DOF index) in creation order, plus the total DOF count.
-		std::vector<std::pair<LinkObj*, uint32_t>> DofLayout(const ArticulationObj& a, uint32_t& total)
+		// Links in the order of the PhysX link index (= order of the flat per-DOF / per-link buffers). PhysX orders its links
+		// (children grouped per level), which differs from the creation order when a link has siblings with children of their
+		// own (suspension arm + wheel on each side). Outside a scene the creation order is used.
+		std::vector<LinkObj*> OrderedLinks(const ArticulationObj& a)
 		{
-			std::vector<std::pair<LinkObj*, uint32_t>> layout;
-			total = 0;
-			// PhysX lays the cache out in its own link index order (children grouped per level), which differs from the
-			// creation order when a link has siblings with children of their own (suspension arm + wheel on each side).
 			std::vector<LinkObj*> ordered(a.links.begin(), a.links.end());
 			if (a.inPxScene)
 			{
@@ -221,7 +222,15 @@ namespace backend::pxw
 					return ix < iy;
 				});
 			}
-			for (LinkObj* l : ordered)
+			return ordered;
+		}
+
+		// Link DOF layout: (link, first flat DOF index) in PhysX link index order, plus the total DOF count.
+		std::vector<std::pair<LinkObj*, uint32_t>> DofLayout(const ArticulationObj& a, uint32_t& total)
+		{
+			std::vector<std::pair<LinkObj*, uint32_t>> layout;
+			total = 0;
+			for (LinkObj* l : OrderedLinks(a))
 			{
 				layout.emplace_back(l, total);
 				total += DofCount(*l);
@@ -239,18 +248,137 @@ namespace backend::pxw
 			}
 		}
 
-		// Period of the position wrap of a joint, 0 when PhysX does not wrap it.
+		// Bit per axis that is a DOF.
+		uint32_t DofMask(const LinkObj& l)
+		{
+			uint32_t mask = 0;
+			for (int axis = 0; axis < artic::kAxisCount; ++axis)
+			{
+				if (EffectiveMotion(l, axis) != Motion::Locked)
+				{
+					mask |= 1u << axis;
+				}
+			}
+			return mask;
+		}
+
+		// Position of an axis among the DOFs of its link (the index into the per-link DOF values).
+		uint32_t DofOrdinal(const LinkObj& l, int axis)
+		{
+			return static_cast<uint32_t>(__builtin_popcount(DofMask(l) & ((1u << axis) - 1u)));
+		}
+
+		void ResetUnwrap(LinkObj& l)
+		{
+			for (int i = 0; i < 3; ++i)
+			{
+				l.unwrapOffset[i] = 0.0f;
+				l.unwrapLast[i] = 0.0f;
+			}
+			l.unwrapInit = false;
+		}
+
+		// The DOFs of a link changed from oldMask: values stored per DOF ordinal (pending state) follow their axis, the unwrap
+		// state (also per ordinal) restarts.
+		void RemapDofState(LinkObj& l, uint32_t oldMask)
+		{
+			ResetUnwrap(l);
+			const uint32_t newMask = DofMask(l);
+			if (newMask == oldMask)
+			{
+				return;
+			}
+			PendingJointState* states[3] = { &l.pendingPosition, &l.pendingVelocity, &l.pendingForce };
+			for (int kind = 0; kind < 3; ++kind)
+			{
+				PendingJointState& p = *states[kind];
+				uint32_t ordinal = 0;
+				for (int axis = 0; axis < artic::kAxisCount; ++axis) // park the values of the old DOFs by axis
+				{
+					if ((oldMask >> axis) & 1u)
+					{
+						if (ordinal < 3)
+						{
+							l.parkedValues[kind][axis] = p.values[ordinal];
+						}
+						++ordinal;
+					}
+				}
+				PendingJointState next;
+				next.set = p.set;
+				ordinal = 0;
+				for (int axis = 0; axis < artic::kAxisCount; ++axis) // and take them back for the new DOFs
+				{
+					if ((newMask >> axis) & 1u)
+					{
+						if (ordinal < 3)
+						{
+							next.values[ordinal] = l.parkedValues[kind][axis];
+						}
+						++ordinal;
+					}
+				}
+				p = next;
+			}
+		}
+
+		// Period of the position wrap of a joint, 0 when PhysX does not wrap it. PhysX 5 recomputes the position of a
+		// spherical joint from its relative rotation, which wraps it into [-pi, pi]; that is how revolute / continuous joints
+		// (one DOF spherical) lose their turns. The revolute joints are created unwrapped there. PhysX 4.1 integrates each DOF
+		// of its revolute and spherical (< 3 DOF) joints and wraps the value into [-2 pi, 2 pi] (DyFeatherstoneForwardDynamic.cpp,
+		// the revolute / spherical cases of the position integration). A three DOF spherical joint reports rotation vector
+		// components in both SDKs: there are no turns to recover.
 		float UnwrapPeriod(const LinkObj& l)
 		{
-			if (l.jointType == JointType::BallAndSocket)
+			if (compat::kPhysXMajor < 5)
+			{
+				const uint32_t dofs = DofCount(l);
+				if (l.jointType == JointType::Hinge || (l.jointType == JointType::BallAndSocket && dofs >= 1 && dofs < 3))
+				{
+					return 4.0f * kPi;
+				}
+				return 0.0f;
+			}
+			if (l.jointType == JointType::BallAndSocket && DofCount(l) == 1)
 			{
 				return 2.0f * kPi;
 			}
-			if (l.jointType == JointType::Hinge && compat::kPhysXMajor < 5)
-			{
-				return 4.0f * kPi;
-			}
 			return 0.0f;
+		}
+
+		// The drive target PhysX gets for an axis: PhysX measures the drive error against the wrapped position, so the
+		// continuous target is moved into the same frame; limited axes clamp it into their range (5.x does not, so the drive
+		// would fight the limit).
+		float DriveTargetOf(const LinkObj& l, int axis)
+		{
+			const AxisConfig& cfg = l.axes[axis];
+			float target = cfg.motor.target;
+			if (UnwrapPeriod(l) > 0.0f)
+			{
+				target -=l.unwrapOffset[std::min(DofOrdinal(l, axis), 2u)];
+			}
+			if (EffectiveMotion(l, axis) == Motion::Limited)
+			{
+				const float bound = LimitBound(l.jointType);
+				target = std::min(std::max(target, std::max(cfg.lowerLimit, -bound)), std::min(cfg.upperLimit, bound));
+			}
+			return target;
+		}
+
+		// Gives PhysX the drive targets again (after the wrap offsets of the link changed).
+		void PushDriveTargets(LinkObj& l)
+		{
+			if (l.joint == nullptr || l.link == nullptr || !l.art->inPxScene)
+			{
+				return;
+			}
+			for (int axis = 0; axis < artic::kAxisCount; ++axis)
+			{
+				if (EffectiveMotion(l, axis) != Motion::Locked)
+				{
+					artic::SetDriveTarget(*l.joint, axis, DriveTargetOf(l, axis), l.axes[axis].motor.targetVelocity);
+				}
+			}
 		}
 
 		bool ReadFlatRaw(ArticulationObj& a, JointData what, std::vector<float>& out);
@@ -313,18 +441,36 @@ namespace backend::pxw
 					continue;
 				}
 				const uint32_t n = std::min(DofCount(l), 3u);
+				bool offsetChanged = false;
 				for (uint32_t i = 0; i < n && entry.second + i < raw.size(); ++i)
 				{
 					const float value = raw[entry.second + i];
 					if (l.unwrapInit)
 					{
 						const float jumps = std::round((value - l.unwrapLast[i]) / period);
-						l.unwrapOffset[i] -= jumps * period;
+						if (jumps != 0.0f)
+						{
+							l.unwrapOffset[i] -= jumps * period;
+							offsetChanged = true;
+						}
 					}
 					l.unwrapLast[i] = value;
 				}
 				l.unwrapInit = true;
+				if (offsetChanged)
+				{
+					PushDriveTargets(l); // the drive error is measured against the wrapped position
+				}
 			}
+		}
+
+		// Stores the continuous value v of DOF i of l as the wrapped value PhysX keeps plus an offset; returns the wrapped value.
+		float WrapWrittenValue(LinkObj& l, uint32_t i, float period, float v)
+		{
+			const float raw = v - period * std::round(v / period);
+			l.unwrapOffset[i] = v - raw;
+			l.unwrapLast[i] = raw;
+			return raw;
 		}
 
 		// Positions written by the caller are continuous values: wraps them into what PhysX stores and restarts the
@@ -341,6 +487,7 @@ namespace backend::pxw
 				{
 					continue;
 				}
+				bool touched = false;
 				for (uint32_t i = 0; i < n; ++i)
 				{
 					const size_t global = entry.second + i;
@@ -349,12 +496,14 @@ namespace backend::pxw
 						continue;
 					}
 					float& v = values[global - start];
-					const float raw = v - period * std::round(v / period);
-					l.unwrapOffset[i] = v - raw;
-					l.unwrapLast[i] = raw;
-					v = raw;
+					v = WrapWrittenValue(l, i, period, v);
+					touched = true;
 				}
-				l.unwrapInit = true;
+				if (touched)
+				{
+					l.unwrapInit = true;
+					PushDriveTargets(l); // the offset moved, the drive target is measured against the wrapped position
+				}
 			}
 		}
 
@@ -449,6 +598,14 @@ namespace backend::pxw
 			uint32_t total = 0;
 			const auto layout = DofLayout(a, total);
 			const uint32_t dofs = a.art->getDofs();
+			std::vector<LinkObj*> rewrapped;
+			for (LinkObj* l : a.links)
+			{
+				if (!l->pendingPosition.set)
+				{
+					ResetUnwrap(*l); // PhysX starts at its default position, nothing to add
+				}
+			}
 			for (JointData what : { JointData::Position, JointData::Velocity, JointData::Force })
 			{
 				bool any = false;
@@ -474,13 +631,24 @@ namespace backend::pxw
 					{
 						continue; // a locked joint keeps its stored state until it gets DOFs again
 					}
+					// Positions are continuous values (see SaveState): store them the way a written position is.
+					const float period = what == JointData::Position ? UnwrapPeriod(*entry.first) : 0.0f;
 					for (uint32_t i = 0; i < n && i < 3 && entry.second + i < dofs; ++i)
 					{
-						data[entry.second + i] = p.values[i];
+						data[entry.second + i] = period > 0.0f ? WrapWrittenValue(*entry.first, i, period, p.values[i]) : p.values[i];
+					}
+					if (period > 0.0f)
+					{
+						entry.first->unwrapInit = true;
+						rewrapped.push_back(entry.first);
 					}
 					p.set = false;
 				}
 				artic::ApplyState(*a.art, *cache, what);
+			}
+			for (LinkObj* l : rewrapped)
+			{
+				PushDriveTargets(*l);
 			}
 		}
 
@@ -494,12 +662,17 @@ namespace backend::pxw
 			}
 			uint32_t total = 0;
 			const auto layout = DofLayout(a, total);
-			for (JointData what : { JointData::Position, JointData::Velocity })
+			for (JointData what : { JointData::Position, JointData::Velocity, JointData::Force })
 			{
 				std::vector<float> flat;
 				if (!ReadFlat(a, what, flat))
 				{
 					continue;
+				}
+				if (what == JointData::Force
+					&& std::none_of(flat.begin(), flat.end(), [](float f) { return f != 0.0f; }))
+				{
+					continue; // no persistent joint force to carry over
 				}
 				for (const auto& entry : layout)
 				{
@@ -509,6 +682,25 @@ namespace backend::pxw
 					{
 						p.values[i] = flat[entry.second + i];
 						p.set = true;
+					}
+				}
+			}
+			// The saved positions are continuous values: the wrap state is rebuilt from them (see ApplyPending).
+			for (LinkObj* l : a.links)
+			{
+				ResetUnwrap(*l);
+			}
+			a.hasSavedRootVelocity = false;
+			if ((a.flags & Physics::ArticulationFlags::ImmovableRoot) == Physics::ArticulationFlags::None)
+			{
+				for (const LinkObj* l : a.links)
+				{
+					if (l->parent == nullptr && Alive(l))
+					{
+						a.savedRootLinearVelocity = l->link->getLinearVelocity();
+						a.savedRootAngularVelocity = l->link->getAngularVelocity();
+						a.hasSavedRootVelocity = !a.savedRootLinearVelocity.isZero() || !a.savedRootAngularVelocity.isZero();
+						break;
 					}
 				}
 			}
@@ -530,6 +722,14 @@ namespace backend::pxw
 				return;
 			}
 			ApplyPending(a);
+			if (a.hasSavedRootVelocity)
+			{
+				a.hasSavedRootVelocity = false;
+				if (artic::Cache* cache = EnsureCache(a))
+				{
+					artic::SetRootVelocity(*a.art, *cache, &a.savedRootLinearVelocity, &a.savedRootAngularVelocity);
+				}
+			}
 			// An articulation re-entering the scene (structure change, simulated toggle) must not start asleep.
 			a.art->wakeUp();
 		}
@@ -604,7 +804,7 @@ namespace backend::pxw
 			drive.forceLimit = SafeForceLimit(cfg.motor.forceLimit);
 			drive.type = cfg.motor.type;
 			artic::SetDrive(*l.joint, axis, drive);
-			artic::SetDriveTarget(*l.joint, axis, cfg.motor.target, cfg.motor.targetVelocity);
+			artic::SetDriveTarget(*l.joint, axis, DriveTargetOf(l, axis), cfg.motor.targetVelocity);
 			WakeIfInScene(*l.art); // a sleeping articulation would ignore the new drive / limit (PhysX 4.1 does not wake on its own)
 		}
 
@@ -773,6 +973,7 @@ namespace backend::pxw
 			{
 				BACKEND_ERRORF("Rebuilding an articulation failed");
 			}
+			RebindJointsOfArticulationLocked(a);
 			SyncScene(a);
 		}
 
@@ -790,6 +991,7 @@ namespace backend::pxw
 			{
 				BACKEND_ERRORF("Rebuilding an articulation failed");
 			}
+			RebindJointsOfArticulationLocked(a);
 		}
 
 		// A change outside the scene is applied to the live PhysX objects, inside the scene it rebuilds them.
@@ -819,7 +1021,11 @@ namespace backend::pxw
 			}
 			if (EffectiveMotion(l, axis) != EffectiveMotionOf(l.jointType, axis, next))
 			{
-				ApplyChange(*l.art, [&] { l.axes[axis] = next; }, [&] { ApplyAxis(l, axis); });
+				ApplyChange(*l.art, [&] {
+					const uint32_t oldMask = DofMask(l);
+					l.axes[axis] = next;
+					RemapDofState(l, oldMask); // the DOF set changed: per-DOF state follows its axis
+				}, [&] { ApplyAxis(l, axis); });
 			}
 			else
 			{
@@ -846,6 +1052,7 @@ namespace backend::pxw
 
 		void FreeLinkWrapper(LinkObj* l)
 		{
+			DetachJointsFromLinkLocked(l);
 			if (l->jointHandle != nullptr)
 			{
 				Unregister(l->jointHandle);
@@ -1179,8 +1386,9 @@ namespace backend::pxw
 			{
 				return;
 			}
-			// Creation order already is the link index order.
-			for (const LinkObj* l : a->links)
+			// In a scene the PhysX link index order (the order of the flat joint buffers) differs from the creation order.
+			const std::vector<LinkObj*> links = cmd.sortedByIndex ? OrderedLinks(*a) : std::vector<LinkObj*>(a->links.begin(), a->links.end());
+			for (const LinkObj* l : links)
 			{
 				if (cmd.written >= cmd.bufferSize)
 				{
@@ -1541,6 +1749,18 @@ namespace backend::pxw
 				return false;
 			}
 			out.assign(pos.size(), 0.0f);
+			// "Target" / "Velocity" drives ignore Unity's gains (they are rigid in PhysX): what the joint transmits along the
+			// DOF is the measure there (PhysX 5), otherwise the rigid drive saturates at its force limit.
+			std::vector<physx::PxVec3> incomingForce;
+			std::vector<physx::PxVec3> incomingTorque;
+			bool haveIncoming = false;
+			if (a.inPxScene)
+			{
+				if (artic::Cache* cache = EnsureCache(a))
+				{
+					haveIncoming = artic::ReadIncomingJointForces(*a.art, *cache, incomingForce, incomingTorque);
+				}
+			}
 			uint32_t total = 0;
 			for (const auto& entry : DofLayout(a, total))
 			{
@@ -1558,7 +1778,31 @@ namespace backend::pxw
 						break;
 					}
 					const auto& m = l.axes[axis].motor;
-					float f = m.stiffness * (m.target - pos[idx]) + m.damping * (m.targetVelocity - vel[idx]);
+					const bool rigid = m.type == Physics::ArticulationMotorType::Target || m.type == Physics::ArticulationMotorType::Velocity;
+					if (rigid && haveIncoming && l.link != nullptr)
+					{
+						const uint32_t linkIndex = l.link->getLinkIndex();
+						if (linkIndex < incomingForce.size())
+						{
+							// Axes: twist, swing1, swing2 are the x / y / z torque of the child joint frame, then x / y / z force.
+							const physx::PxVec3& v = axis < 3 ? incomingTorque[linkIndex] : incomingForce[linkIndex];
+							float f = v[axis % 3];
+							const float limit = SafeForceLimit(m.forceLimit);
+							out[idx] = std::min(std::max(f, -limit), limit);
+							continue;
+						}
+					}
+					float f;
+					if (rigid)
+					{
+						// 4.1 style rigid drive: saturates towards the target, bounded by the force limit below.
+						const float error = m.type == Physics::ArticulationMotorType::Target ? (m.target - pos[idx]) : (m.targetVelocity - vel[idx]);
+						f = kRigidDriveGain * error;
+					}
+					else
+					{
+						f = m.stiffness * (m.target - pos[idx]) + m.damping * (m.targetVelocity - vel[idx]);
+					}
 					if (m.type != Physics::ArticulationMotorType::Acceleration)
 					{
 						const float limit = SafeForceLimit(m.forceLimit);
@@ -1620,11 +1864,12 @@ namespace backend::pxw
 			LinkScope l(sdkObject, ctx);
 			if (l)
 			{
-				const auto& links = l->art->links;
+				// In a scene: the PhysX link index, the same order as the flat joint buffers.
+				const auto links = OrderedLinks(*l->art);
 				const auto it = std::find(links.begin(), links.end(), l.get());
 				if (it != links.end())
 				{
-					cmd.value = static_cast<int>(it - links.begin());
+					cmd.value = l->art->inPxScene ? static_cast<int>(l->link->getLinkIndex()) : static_cast<int>(it - links.begin());
 				}
 			}
 		}
@@ -2062,7 +2307,9 @@ namespace backend::pxw
 			}
 			if (simShapes > 0 && l->mass > 0.0f)
 			{
-				physx::PxRigidBodyExt::setMassAndUpdateInertia(*l->link, l->mass);
+				// With an explicit center of mass the inertia is computed about it (as Unity does), not about the shapes' centroid.
+				const physx::PxVec3 centerOfMass = ToPx(overrides.centerOfMass);
+				physx::PxRigidBodyExt::setMassAndUpdateInertia(*l->link, l->mass, overrides.overrideCenterOfMass ? &centerOfMass : nullptr);
 			}
 
 			physx::PxTransform cm = l->link->getCMassLocalPose();
@@ -2144,7 +2391,11 @@ namespace backend::pxw
 			}
 			if (l->joint != nullptr)
 			{
-				ApplyChange(*l->art, [&] { l->jointType = type; }, [&] { ApplyJoint(*l); });
+				ApplyChange(*l->art, [&] {
+					const uint32_t oldMask = DofMask(*l);
+					l->jointType = type;
+					RemapDofState(*l, oldMask);
+				}, [&] { ApplyJoint(*l); });
 			}
 			else
 			{
@@ -2523,6 +2774,7 @@ namespace backend::pxw
 		}
 		a->art->release();
 		a->art = nullptr;
+		ReleaseArticulationCollisionGroup(a->collisionGroup);
 
 		if (a->world != nullptr)
 		{

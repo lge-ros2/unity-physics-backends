@@ -69,11 +69,16 @@ namespace backend::pxw
 		Physics::Pose parentFrame;
 		Physics::Pose childFrame;
 
-		// Continuous joint positions: PhysX wraps spherical joints (and the revolute joints of 4.1) into a fixed range, the
-		// reported position is raw + offset, where the offset is advanced whenever the raw value jumps by a period.
+		// Continuous joint positions: PhysX 5 wraps the position of a spherical joint into [-pi, pi], PhysX 4.1 the one of its
+		// revolute and spherical (< 3 DOF) joints into [-2 pi, 2 pi] (see UnwrapPeriod). For those the reported position is
+		// raw + offset, where the offset is advanced whenever the raw value jumps by a period. Indexed by DOF ordinal of the
+		// link, not by axis.
 		float unwrapOffset[3] = { 0.0f, 0.0f, 0.0f };
 		float unwrapLast[3] = { 0.0f, 0.0f, 0.0f };
 		bool unwrapInit = false;
+
+		// Per-axis values (position, velocity, force) of axes that stopped being a DOF; they come back when the axis does.
+		float parkedValues[3][artic::kAxisCount] = {};
 
 		PendingJointState pendingPosition;
 		PendingJointState pendingVelocity;
@@ -97,5 +102,9 @@ namespace backend::pxw
 		// Shapes of all links share this group and never collide with each other (see EncodeShapeFilter).
 		uint16_t collisionGroup = 0;
 		artic::Cache* cache = nullptr; // lazily created, dropped on every structural change
+		// Root link velocities saved while the articulation leaves the scene (see SaveState), applied when it re-enters.
+		physx::PxVec3 savedRootLinearVelocity = physx::PxVec3(0.0f);
+		physx::PxVec3 savedRootAngularVelocity = physx::PxVec3(0.0f);
+		bool hasSavedRootVelocity = false;
 	};
 }

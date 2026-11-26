@@ -504,6 +504,74 @@ namespace
 		return links;
 	}
 
+	// Root plus one spherical child (twist about world Z) with freeAxes angular axes free (1 = a revolute / continuous joint
+	// the way CLOiSim models it, 3 = a ball joint).
+	struct Wheel
+	{
+		Handle art = nullptr;
+		Handle root = nullptr;
+		Handle link = nullptr;
+	};
+
+	Wheel BuildWheel(Handle world, int freeAxes, Physics::ArticulationFlags flags = kFixedFlags)
+	{
+		Wheel w;
+		w.art = CreateArticulation(world, flags);
+		w.root = CreateLink(world, w.art, nullptr, Physics::Pose(0, 3, 0, 0, 0, 0, 1));
+		LinkAttachBox(world, w.root, 0.1f, 0.1f, 0.1f, 5.0f);
+		w.link = CreateLink(world, w.art, w.root, Physics::Pose(0, 3, 0, 0, 0, 0, 1));
+		LinkJointType(world, w.link, JointType::BallAndSocket);
+		LinkFrames(world, w.link, AxisFrame(0, 0, 0, 2), AxisFrame(0, 0, 0, 2));
+		const ConstraintAxis axes[3] = { ConstraintAxis::AngularX, ConstraintAxis::AngularY, ConstraintAxis::AngularZ };
+		for (int i = 0; i < freeAxes && i < 3; ++i)
+		{
+			LinkAxisLock(world, w.link, axes[i], JointDofLock::Free);
+		}
+		LinkAttachBox(world, w.link, 0.2f, 0.2f, 0.05f, 1.0f);
+		LinkFriction(world, w.link, 0.0f);
+		LinkDamping(world, w.link, 0.0f, 0.0f);
+		AddArticulationToScene(world, w.art);
+		return w;
+	}
+
+	void SetRootLinearVelocity(Handle world, Handle link, const Physics::Vec3& v)
+	{
+		ArticulationLinkData::SetLinearVelocity sv{};
+		sv.value = v;
+		sv.awake = true;
+		Run(link, Context(world, link), Articulation::SetLinkLinearVelocity, sv);
+	}
+
+	void SetJointForce(Handle world, Handle link, float x)
+	{
+		ArticulationJointData::SetForce sf{};
+		sf.value.coordinate = Physics::Vec3(x, 0.0f, 0.0f);
+		sf.value.dofCount = 1;
+		Run(link, Context(world, link), Articulation::SetLinkJointForce, sf);
+	}
+
+	float JointForce(Handle world, Handle link)
+	{
+		ArticulationJointData::GetForce gf{};
+		Run(link, Context(world, link), Articulation::GetLinkJointForce, gf);
+		return gf.value.coordinate.x;
+	}
+
+	float MotorForce(Handle world, Handle link)
+	{
+		ArticulationJointData::GetMotorForce mf{};
+		Run(link, Context(world, link), Articulation::GetLinkJointMotorForce, mf);
+		return mf.value.coordinate.x;
+	}
+
+	void SetArticulationSimulated(Handle world, Handle art, bool on)
+	{
+		ArticulationData::SetFlags sf{};
+		sf.value = Physics::ArticulationFlags::Simulated;
+		sf.enabled = on;
+		Run(art, Context(world, art), Articulation::SetFlags, sf);
+	}
+
 	void DestroyWorld(Handle world)
 	{
 		ShapeData::DestroyShape dummy;
@@ -1454,6 +1522,223 @@ int main(int argc, char** argv)
 		Check(!gs.value, "WakeUp wakes it again");
 		DestroyWorld(world);
 	}
+	// ---- (j) continuous joint positions, drive targets, state across rebuilds ----
+	std::printf("[j] continuous joints, drive targets, rebuilds\n");
+	{
+		// revolute joint: the position keeps counting turns (PhysX 4.1 does not wrap it either)
+		Handle world = CreateWorld(0.0f);
+		Pendulum p = BuildPendulum(world, 3.0f);
+		SetJointVelocity(world, p.link, 10.0f);
+		Step(world, 1.0f);
+		const float pos = JointPosition(world, p.link).coordinate.x;
+		std::printf("  hinge spun at 10 rad/s for 1 s: pos=%.3f\n", pos);
+		Check(Near(pos, 10.0f, 0.3f), "revolute joint position is continuous");
+		DestroyWorld(world);
+	}
+	{
+		// a one DOF spherical joint (CLOiSim's revolute / continuous) is continuous, a three DOF one is not unwrapped
+		Handle world = CreateWorld(0.0f);
+		Wheel w = BuildWheel(world, 1);
+		SetJointVelocity(world, w.link, 10.0f);
+		Step(world, 1.0f);
+		const float pos = JointPosition(world, w.link).coordinate.x;
+		std::printf("  1 DOF spherical spun at 10 rad/s for 1 s: pos=%.3f\n", pos);
+		Check(Near(pos, 10.0f, 0.3f), "one DOF spherical joint position is continuous");
+		SetJointPosition(world, w.link, 7.0f);
+		Check(Near(JointPosition(world, w.link).coordinate.x, 7.0f, 1e-3f), "a written continuous position reads back");
+		DestroyWorld(world);
+	}
+	{
+		Handle world = CreateWorld(0.0f);
+		Wheel w = BuildWheel(world, 3);
+		SetJointVelocity(world, w.link, 4.0f, 0.0f, 0.0f, 3);
+		Step(world, 1.5f);
+		const Physics::Vec3 c = JointPosition(world, w.link).coordinate;
+		std::printf("  3 DOF spherical spun 6 rad: pos=(%.3f %.3f %.3f)\n", c.x, c.y, c.z);
+		Check(std::fabs(c.x) <= kPi + 0.05f && std::fabs(c.y) <= kPi + 0.05f && std::fabs(c.z) <= kPi + 0.05f,
+			"three DOF spherical positions are rotation vector components (not unwrapped)");
+		DestroyWorld(world);
+	}
+	{
+		// continuous drive targets converge on the unwrapped position (PhysX 5 measures the error against the wrapped one)
+		Handle world = CreateWorld(0.0f);
+		Wheel w = BuildWheel(world, 1);
+		LinkDrive(world, w.link, ConstraintAxis::AngularX, 50.0f, 5.0f, 1e6f, 4.0f);
+		Step(world, 3.0f);
+		const float first = JointPosition(world, w.link).coordinate.x;
+		SetJointPosition(world, w.link, 7.0f);
+		LinkDrive(world, w.link, ConstraintAxis::AngularX, 50.0f, 5.0f, 1e6f, 7.2f);
+		Step(world, 3.0f);
+		const float second = JointPosition(world, w.link).coordinate.x;
+		LinkDrive(world, w.link, ConstraintAxis::AngularX, 50.0f, 5.0f, 1e6f, 1.0f);
+		Step(world, 3.0f);
+		const float third = JointPosition(world, w.link).coordinate.x;
+		std::printf("  continuous drive targets 4.0 / 7.2 / 1.0 -> %.4f / %.4f / %.4f\n", first, second, third);
+		Check(Near(first, 4.0f, 0.05f), "drive reaches a target beyond pi");
+		Check(Near(second, 7.2f, 0.05f), "drive reaches a target next to a multi-turn position");
+		Check(Near(third, 1.0f, 0.05f), "drive turns back to a target several turns away");
+		DestroyWorld(world);
+	}
+	{
+		// the joint state (continuous position) survives rebuilds: leaving the scene, a DOF set change
+		Handle world = CreateWorld(0.0f);
+		Wheel w = BuildWheel(world, 1);
+		SetJointPosition(world, w.link, 7.0f);
+		SetArticulationSimulated(world, w.art, false);
+		SetArticulationSimulated(world, w.art, true);
+		const float afterToggle = JointPosition(world, w.link).coordinate.x;
+		LinkAxisLock(world, w.link, ConstraintAxis::AngularX, JointDofLock::Locked);
+		LinkAxisLock(world, w.link, ConstraintAxis::AngularX, JointDofLock::Free);
+		const float afterRebuild = JointPosition(world, w.link).coordinate.x;
+		LinkDrive(world, w.link, ConstraintAxis::AngularX, 50.0f, 5.0f, 1e6f, 7.2f);
+		Step(world, 3.0f);
+		const float driven = JointPosition(world, w.link).coordinate.x;
+		std::printf("  continuous position 7.0 after toggle / rebuild: %.4f / %.4f, driven to 7.2: %.4f\n", afterToggle, afterRebuild, driven);
+		Check(Near(afterToggle, 7.0f, 1e-3f), "continuous position survives leaving the scene");
+		Check(Near(afterRebuild, 7.0f, 1e-3f), "continuous position survives a rebuild");
+		Check(Near(driven, 7.2f, 0.05f), "drive target stays continuous after a rebuild");
+		DestroyWorld(world);
+	}
+	{
+		// per-DOF state follows its axis when the DOF set changes (the swing axis is added in front of nothing, twist stays)
+		Handle world = CreateWorld(0.0f);
+		Wheel w = BuildWheel(world, 1);
+		SetJointPosition(world, w.link, 0.5f);
+		LinkAxisLock(world, w.link, ConstraintAxis::AngularY, JointDofLock::Free);
+		const Physics::ReducedSpaceCoordinateStorage both = JointPosition(world, w.link);
+		LinkAxisLock(world, w.link, ConstraintAxis::AngularX, JointDofLock::Locked);
+		const Physics::ReducedSpaceCoordinateStorage swingOnly = JointPosition(world, w.link);
+		std::printf("  twist 0.5 -> +swing: (%.3f %.3f) dofs=%d, twist locked: (%.3f) dofs=%d\n", both.coordinate.x, both.coordinate.y, both.dofCount,
+			swingOnly.coordinate.x, swingOnly.dofCount);
+		Check(both.dofCount == 2 && Near(both.coordinate.x, 0.5f, 1e-3f) && Near(both.coordinate.y, 0.0f, 1e-3f), "twist keeps its value when a swing axis is added");
+		Check(swingOnly.dofCount == 1 && Near(swingOnly.coordinate.x, 0.0f, 1e-3f), "the swing DOF does not inherit the twist value");
+		DestroyWorld(world);
+	}
+	{
+		// a drive target of a limited axis is clamped into the limits
+		Handle world = CreateWorld(0.0f);
+		Pendulum p = BuildPendulum(world, 3.0f, false);
+		LinkAxisLock(world, p.link, ConstraintAxis::AngularX, JointDofLock::Limited);
+		LinkLimit(world, p.link, ConstraintAxis::AngularX, -0.5f, 0.5f);
+		LinkDrive(world, p.link, ConstraintAxis::AngularX, 100.0f, 20.0f, 1e6f, 2.0f);
+		AddArticulationToScene(world, p.art);
+		Step(world, 2.0f);
+		const float pos = JointPosition(world, p.link).coordinate.x;
+		const float vel = JointVelocity(world, p.link).coordinate.x;
+		std::printf("  limited [-0.5, 0.5] with target 2.0: pos=%.4f vel=%.5f\n", pos, vel);
+		Check(Near(pos, 0.5f, 0.01f) && std::fabs(vel) < 0.05f, "drive towards a target beyond the limit settles at the limit");
+		DestroyWorld(world);
+	}
+	{
+		// link order: siblings with children make the PhysX link index differ from the creation order
+		Handle world = CreateWorld(0.0f);
+		Handle art = CreateArticulation(world, kFixedFlags);
+		Handle root = CreateLink(world, art, nullptr, Physics::Pose(0, 3, 0, 0, 0, 0, 1), FakeUser(100));
+		std::vector<Handle> links = { root };
+		const int creationParent[4] = { 0, 1, 0, 3 }; // creation order: root, A, A1 (under A), B, B1 (under B)
+		for (int i = 0; i < 4; ++i)
+		{
+			Handle link = CreateLink(world, art, links[creationParent[i]], Physics::Pose(0, 3, 0, 0, 0, 0, 1), FakeUser(101 + i));
+			LinkJointType(world, link, JointType::Hinge);
+			LinkFrames(world, link, AxisFrame(0, 0, 0, 2), AxisFrame(0, 0, 0, 2));
+			LinkAxisLock(world, link, ConstraintAxis::AngularX, JointDofLock::Free);
+			links.push_back(link);
+		}
+		AddArticulationToScene(world, art);
+		for (size_t i = 1; i < links.size(); ++i)
+		{
+			SetJointPosition(world, links[i], 0.1f * static_cast<float>(i));
+		}
+		const std::vector<float> flat = JointsPositions(world, art);
+		std::vector<void*> sorted(links.size(), nullptr);
+		ArticulationData::GetLinksUserData gu{};
+		gu.sortedByIndex = true;
+		gu.buffer = sorted.data();
+		gu.bufferSize = sorted.size();
+		Run(art, Context(world, art), Articulation::GetLinksUserData, gu);
+		bool bufferOk = flat.size() == links.size() - 1;
+		bool userDataOk = gu.written == links.size();
+		bool differsFromCreation = false;
+		for (size_t i = 0; i < links.size(); ++i)
+		{
+			ArticulationLinkData::GetLinkIndex gi{};
+			Run(links[i], Context(world, links[i]), Articulation::GetLinkIndex, gi);
+			differsFromCreation = differsFromCreation || gi.value != static_cast<int>(i);
+			if (gi.value < 0 || static_cast<size_t>(gi.value) >= links.size())
+			{
+				bufferOk = userDataOk = false;
+				continue;
+			}
+			userDataOk = userDataOk && sorted[gi.value] == FakeUser(i == 0 ? 100 : 100 + static_cast<intptr_t>(i));
+			if (i > 0)
+			{
+				bufferOk = bufferOk && gi.value >= 1 && static_cast<size_t>(gi.value - 1) < flat.size()
+					&& Near(flat[gi.value - 1], 0.1f * static_cast<float>(i), 1e-3f);
+			}
+		}
+		std::printf("  link index differs from creation order: %s\n", differsFromCreation ? "yes" : "no");
+		Check(differsFromCreation, "the sibling layout orders PhysX links differently from creation order");
+		Check(bufferOk, "GetLinkIndex addresses the flat joint buffers");
+		Check(userDataOk, "GetLinksUserData(sortedByIndex) follows the link index");
+		DestroyWorld(world);
+	}
+	{
+		// drive force of a "velocity" motor (gains 0 in Unity): follows what the joint transmits (5.x) / the rigid drive (4.1)
+		Handle world = CreateWorld(0.0f);
+		Pendulum p = BuildPendulum(world, 3.0f, false);
+		LinkDrive(world, p.link, ConstraintAxis::AngularX, 0.0f, 0.0f, 50.0f, 0.0f, 3.0f, Physics::ArticulationMotorType::Velocity);
+		AddArticulationToScene(world, p.art);
+		Step(world, kDt);
+		const float forward = MotorForce(world, p.link);
+		const std::vector<float> forwardBuffer = GetBuffer<ArticulationData::GetJointsDriveForces>(world, p.art, Articulation::GetJointsDriveForces);
+		LinkDrive(world, p.link, ConstraintAxis::AngularX, 0.0f, 0.0f, 50.0f, 0.0f, -3.0f, Physics::ArticulationMotorType::Velocity);
+		Step(world, 3.0f * kDt);
+		const float backward = MotorForce(world, p.link);
+		std::printf("  velocity motor drive force: +3 rad/s -> %.3f, -3 rad/s -> %.3f\n", forward, backward);
+		Check(forward > 10.0f && forward <= 50.01f, "velocity motor reports a positive drive force while accelerating");
+		Check(forwardBuffer.size() == 1 && Near(forwardBuffer[0], forward, 1e-3f), "bulk drive forces agree");
+		Check(backward < -10.0f && backward >= -50.01f, "velocity motor drive force follows the direction");
+		DestroyWorld(world);
+	}
+	{
+		// root velocity and persistent joint forces survive a rebuild
+		Handle world = CreateWorld(0.0f);
+		Wheel w = BuildWheel(world, 1, kFreeFlags);
+		SetRootLinearVelocity(world, w.root, Physics::Vec3(1.0f, 0.0f, 0.0f));
+		SetJointForce(world, w.link, 2.0f);
+		const float forceBefore = JointForce(world, w.link);
+		const Physics::Vec3 vBefore = LinkLinearVelocity(world, w.root);
+		LinkAxisLock(world, w.link, ConstraintAxis::AngularX, JointDofLock::Locked);
+		LinkAxisLock(world, w.link, ConstraintAxis::AngularX, JointDofLock::Free);
+		const Physics::Vec3 vAfter = LinkLinearVelocity(world, w.root);
+		const float forceAfter = JointForce(world, w.link);
+		std::printf("  root velocity %.3f -> %.3f, joint force %.3f -> %.3f across rebuilds\n", vBefore.x, vAfter.x, forceBefore, forceAfter);
+		Check(Near(vBefore.x, 1.0f, 0.05f), "root velocity was set");
+		Check(Near(vAfter.x, vBefore.x, 0.05f), "root velocity survives a rebuild");
+		Check(Near(forceAfter, forceBefore, 1e-3f), "persistent joint force survives a rebuild");
+		SetArticulationSimulated(world, w.art, false);
+		SetArticulationSimulated(world, w.art, true);
+		Check(Near(LinkLinearVelocity(world, w.root).x, vBefore.x, 0.05f), "root velocity survives leaving the scene");
+		DestroyWorld(world);
+	}
+	{
+		// an explicit center of mass: the inertia is taken about it (parallel axis term)
+		Handle world = CreateWorld(0.0f);
+		Pendulum p = BuildPendulum(world, 3.0f, false);
+		ArticulationLinkData::GetInertiaTensor gi{};
+		Run(p.link, Context(world, p.link), Articulation::GetLinkInertiaTensor, gi);
+		const float plain = std::max(gi.value.y, gi.value.z);
+		ArticulationLinkData::RecomputeMassProperties rp;
+		rp.overrides.overrideCenterOfMass = true;
+		rp.overrides.centerOfMass = Physics::Vec3(0.5f, 0.0f, 0.0f);
+		Run(p.link, Context(world, p.link), Articulation::RecomputeLinkMassProperties, rp);
+		Run(p.link, Context(world, p.link), Articulation::GetLinkInertiaTensor, gi);
+		const float shifted = std::max(gi.value.y, gi.value.z);
+		std::printf("  inertia about the centroid %.4f, about a center of mass 0.5 m away %.4f\n", plain, shifted);
+		Check(shifted > plain + 0.9f * 1.0f * 0.25f, "inertia includes the offset of an explicit center of mass");
+		DestroyWorld(world);
+	}
+
 	// a world with a live articulation is left for ShutdownSdk to clean up
 	Handle leftoverWorld = CreateWorld(-9.81f);
 	Pendulum leftover = BuildPendulum(leftoverWorld, 5.0f);

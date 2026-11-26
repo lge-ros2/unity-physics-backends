@@ -9,6 +9,7 @@
 #include <PxPhysicsAPI.h>
 
 #include <cstdint>
+#include <vector>
 
 namespace backend::artic
 {
@@ -73,6 +74,10 @@ namespace backend::artic
 	void CopyState(Articulation& articulation, Cache& cache, JointData what);
 	void ApplyState(Articulation& articulation, Cache& cache, JointData what);
 	float* Data(Cache& cache, JointData what);
+
+	// Total force / torque each link receives through its inbound joint (PhysX link index order, child joint frame, root = 0)
+	// as of the last step. False when the SDK cannot report it (PhysX 4.1).
+	bool ReadIncomingJointForces(Articulation& articulation, Cache& cache, std::vector<physx::PxVec3>& force, std::vector<physx::PxVec3>& torque);
 
 	// Inverse dynamics helpers: the result is left in Data(cache, JointData::Force).
 	void ComputeGravityForces(Articulation& articulation, Cache& cache);

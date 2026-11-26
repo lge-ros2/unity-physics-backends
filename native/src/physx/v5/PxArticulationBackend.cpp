@@ -198,6 +198,24 @@ namespace backend::artic
 		}
 	}
 
+	bool ReadIncomingJointForces(Articulation& articulation, Cache& cache, std::vector<physx::PxVec3>& force, std::vector<physx::PxVec3>& torque)
+	{
+		if (cache.linkIncomingJointForce == nullptr)
+		{
+			return false;
+		}
+		articulation.copyInternalStateToCache(cache, physx::PxArticulationCacheFlag::eLINK_INCOMING_JOINT_FORCE);
+		const physx::PxU32 count = articulation.getNbLinks();
+		force.resize(count);
+		torque.resize(count);
+		for (physx::PxU32 i = 0; i < count; ++i)
+		{
+			force[i] = cache.linkIncomingJointForce[i].force;
+			torque[i] = cache.linkIncomingJointForce[i].torque;
+		}
+		return true;
+	}
+
 	void ComputeGravityForces(Articulation& articulation, Cache& cache)
 	{
 		articulation.commonInit();
