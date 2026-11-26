@@ -276,19 +276,19 @@ namespace backend::pxw
 				{
 					body->dynamic->setMass(cmd.mass);
 				}
-				body->dynamic->setMaxLinearVelocity(body->maxLinearVelocity);
+				body->maxLinearVelocity = body->dynamic->getMaxLinearVelocity(); // keep PhysX default (Unity never sets it)
 				body->dynamic->setMaxAngularVelocity(body->maxAngularVelocity);
 				body->dynamic->setMaxDepenetrationVelocity(body->maxDepenetrationVelocity);
 				body->dynamic->setSleepThreshold(body->sleepThreshold);
 				body->dynamic->setSolverIterationCounts(body->positionIterations, body->velocityIterations);
 			}
+			// Unity 6000.6.7f1 never sends AddActorsToScene for plain bodies, so ApplyBodyFlags adds the actor to the
+			// scene here, but only when the Simulated flag is set (as in the built-in backend).
+			body->world = world;
 			ApplyBodyFlags(*body, cmd.flags);
 
 			world->bodies.push_back(body);
 			Register(body, Kind::Body, body, world->state);
-			// Unity 6000.6.7f1 never sends AddActorsToScene for plain bodies, so they join the scene here.
-			world->scene->addActor(*body->actor);
-			body->inScene = true;
 			cmd.outBody = body;
 		}
 

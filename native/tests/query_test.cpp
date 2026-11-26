@@ -129,12 +129,13 @@ namespace
 		return g;
 	}
 
-	Physics::ShapeGeometry CapsuleGeom(float r, float height)
+	// halfHeight: the PhysX half height of the cylinder part; Unity's engine already sends it in capsuleGeometry.height.
+	Physics::ShapeGeometry CapsuleGeom(float r, float halfHeight)
 	{
 		Physics::ShapeGeometry g = {};
 		g.type = Physics::GeometryType::Capsule;
 		g.capsuleGeometry.radius = r;
-		g.capsuleGeometry.height = height;
+		g.capsuleGeometry.height = halfHeight;
 		return g;
 	}
 
@@ -484,12 +485,12 @@ int main(int argc, char** argv)
 	// Row along +X, all at y = z = 0:
 	//   box     (static,  layer 1)  center 10, half 1        -> front face x = 9
 	//   sphere  (dynamic, layer 2)  center 20, radius 1      -> front x = 19
-	//   capsule (static,  layer 4)  center 30, r 1, h 4      -> axis along X, front x = 28
+	//   capsule (static,  layer 4)  center 30, r 1, half h 1     -> axis along X, front x = 28
 	//   trigger (static,  layer 8)  center 40, box half 1    -> front x = 39
 	Dummy users[8] = { { 101 }, { 102 }, { 103 }, { 104 }, { 105 }, { 106 }, { 107 }, { 108 } };
 	const Placed box = Place(world, material, true, Physics::Vec3(10, 0, 0), BoxGeom(1, 1, 1), &users[0], 1);
 	const Placed sphere = Place(world, material, false, Physics::Vec3(20, 0, 0), SphereGeom(1), &users[1], 2);
-	const Placed capsule = Place(world, material, true, Physics::Vec3(30, 0, 0), CapsuleGeom(1, 4), &users[2], 4);
+	const Placed capsule = Place(world, material, true, Physics::Vec3(30, 0, 0), CapsuleGeom(1, 1), &users[2], 4);
 	const Placed trigger = Place(world, material, true, Physics::Vec3(40, 0, 0), BoxGeom(1, 1, 1), &users[3], 8, true);
 
 	// Multi-shape body for the body casts (kept away from the row): shapes at local (0,0,0) sphere and (0,5,0) box.
@@ -595,7 +596,7 @@ int main(int argc, char** argv)
 		const Physics::QueryFilterData f = Filter(kAll);
 		Check(OverlapFirst(world, BoxGeom(0.2f, 0.2f, 0.2f), Physics::Pose(10.5f, 0, 0, 0, 0, 0, 1), f) == &users[0], "box query overlaps the box");
 		Check(OverlapFirst(world, SphereGeom(0.1f), Physics::Pose(19.5f, 0, 0, 0, 0, 0, 1), f) == &users[1], "sphere query overlaps the sphere");
-		Check(OverlapFirst(world, CapsuleGeom(0.1f, 1.0f), Physics::Pose(28.5f, 0, 0, 0, 0, 0, 1), f) == &users[2], "capsule query overlaps the capsule");
+		Check(OverlapFirst(world, CapsuleGeom(0.1f, 0.4f), Physics::Pose(28.5f, 0, 0, 0, 0, 0, 1), f) == &users[2], "capsule query overlaps the capsule");
 		Check(OverlapFirst(world, SphereGeom(0.5f), Physics::Pose(0, 50, 0, 0, 0, 0, 1), f) == nullptr, "empty space has no overlap");
 		Check(OverlapFirst(world, SphereGeom(0.5f), Physics::Pose(40, 0, 0, 0, 0, 0, 1), f) == nullptr, "trigger not overlapped by default");
 		Check(OverlapFirst(world, SphereGeom(0.5f), Physics::Pose(40, 0, 0, 0, 0, 0, 1), Filter(kAll | Opt::UseTriggerShapes)) == &users[3],
@@ -665,7 +666,7 @@ int main(int argc, char** argv)
 		r = ShapeCast(world, BoxGeom(0.5f, 0.5f, 0.5f), Physics::Pose(0, 0, 0, 0, 0, 0, 1), kPlusX, 100.0f, f);
 		// box-vs-box sweeps in PhysX stop ~2.5e-3 early, hence the looser tolerance
 		Check(r.hitCount == 1 && Near(r.hit.distance, 8.5f, 1e-2f), "box cast hits the box at 8.5");
-		r = ShapeCast(world, CapsuleGeom(0.5f, 2.0f), Physics::Pose(0, 0, 0, 0, 0, 0, 1), kPlusX, 100.0f, f);
+		r = ShapeCast(world, CapsuleGeom(0.5f, 0.5f), Physics::Pose(0, 0, 0, 0, 0, 0, 1), kPlusX, 100.0f, f);
 		Check(r.hitCount == 1 && Near(r.hit.distance, 8.0f, 1e-3f), "capsule cast hits the box at 8.0");
 		r = ShapeCast(world, SphereGeom(0.5f), Physics::Pose(0, 0, 0, 0, 0, 0, 1), kPlusX, 5.0f, f);
 		Check(r.hitCount == 0, "sphere cast shorter than the gap");

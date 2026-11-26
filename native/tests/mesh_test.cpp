@@ -20,6 +20,7 @@
 #include "PhysicsWorldCommandData.h"
 #include "PhysicsBodyCommandData.h"
 #include "PhysicsShapeCommandData.h"
+#include "PhysicsQueryCommandData.h"
 
 #ifndef FALL_TEST_BACKEND_PATH
 #define FALL_TEST_BACKEND_PATH "libPhysX5Backend.so"
@@ -784,6 +785,25 @@ namespace
 		Check(Near(pr.z, 7.0f, 0.4f), "sphere keeps its z while rolling down the slope");
 		DestroyWorld(world);
 		DestroyHeightField(slopeField);
+
+		// cell diagonal: the tess flag is set on every sample (as in the built-in backend). In a single cell with
+		// corners (0,0)=0, (1,0)=1000, (0,1)=1000, (1,1)=0 the flag decides which diagonal splits it, so the
+		// height at the cell center is 0 m with the flag set (the diagonal joins the two zero corners) and 1 m without.
+		world = CreateWorld();
+		const std::vector<int16_t> saddle = { 0, 1000, 1000, 0 };
+		Handle saddleField = CreateHeightField(saddle, 2);
+		Handle saddleShape = nullptr;
+		AddStatic(world, TerrainGeom(saddleField, scale), &saddleShape);
+		QueryData::RayCastAgainstShape ray{};
+		ray.origin = Physics::Vec3(1.0f, 10.0f, 1.0f);
+		ray.direction = Physics::Vec3(0.0f, -1.0f, 0.0f);
+		ray.filterOptions = Physics::QueryFilterFlags::UseDynamicBodies | Physics::QueryFilterFlags::UseStaticBodies;
+		ray.maxDistance = 100.0f;
+		Run(saddleShape, Context(world, nullptr), Query::RayCastAgainstShape, ray);
+		std::printf("  tess flag: cell center height %.3f\n", 10.0f - ray.hit.distance);
+		Check(ray.hitCount == 1 && Near(10.0f - ray.hit.distance, 0.0f, 0.01f), "heightfield cell diagonal follows the tess flag");
+		DestroyWorld(world);
+		DestroyHeightField(saddleField);
 
 		// holes: cell (x = 1, z = 4) -> world x 2..4, z 8..10 (hole mask is (res-1)^2, z-major)
 		world = CreateWorld();

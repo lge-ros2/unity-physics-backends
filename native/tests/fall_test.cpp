@@ -220,12 +220,13 @@ namespace
 		return g;
 	}
 
-	Physics::ShapeGeometry CapsuleGeom(float r, float height)
+	// halfHeight: the PhysX half height of the cylinder part; Unity's engine already sends it in capsuleGeometry.height.
+	Physics::ShapeGeometry CapsuleGeom(float r, float halfHeight)
 	{
 		Physics::ShapeGeometry g = {};
 		g.type = Physics::GeometryType::Capsule;
 		g.capsuleGeometry.radius = r;
-		g.capsuleGeometry.height = height;
+		g.capsuleGeometry.height = halfHeight;
 		return g;
 	}
 
@@ -371,7 +372,7 @@ int main(int argc, char** argv)
 	fallers[3] = { "ghost", nullptr, nullptr, 0.0f, false };
 	fallers[4] = { "ignored", nullptr, nullptr, 0.0f, false };
 	const float xs[5] = { -4.0f, 0.0f, 4.0f, 8.0f, -10.0f };
-	const Physics::ShapeGeometry geoms[5] = { BoxGeom(0.5f, 0.5f, 0.5f), SphereGeom(0.5f), CapsuleGeom(0.5f, 2.0f), BoxGeom(0.5f, 0.5f, 0.5f), BoxGeom(0.5f, 0.5f, 0.5f) };
+	const Physics::ShapeGeometry geoms[5] = { BoxGeom(0.5f, 0.5f, 0.5f), SphereGeom(0.5f), CapsuleGeom(0.5f, 0.5f), BoxGeom(0.5f, 0.5f, 0.5f), BoxGeom(0.5f, 0.5f, 0.5f) };
 	const Physics::FilterData filters[5] = { MakeFilter(1, 0xFFFFFFFFu), MakeFilter(1, 0xFFFFFFFFu), MakeFilter(1, 0xFFFFFFFFu),
 		MakeFilter(2, 2), MakeFilter(1, 0xFFFFFFFFu, 5) };
 
@@ -580,6 +581,9 @@ int main(int argc, char** argv)
 		Run(probe, bctx, Body::GetAngularVelocity, gav);
 		Check(gav.value.z == 1.0f, "angular velocity round trip");
 
+		BodyData::GetMaxLinearVelocity gml0{};
+		Run(probe, bctx, Body::GetMaxLinearVelocity, gml0);
+		Check(gml0.value >= 1e15f, "default max linear velocity is the PhysX default (not clamped)");
 		BodyData::SetMaxLinearVelocity sml;
 		sml.value = 55.0f;
 		Run(probe, bctx, Body::SetMaxLinearVelocity, sml);

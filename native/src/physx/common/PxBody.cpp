@@ -184,6 +184,7 @@ namespace backend::pxw
 			if (shape->owner != nullptr)
 			{
 				BodyObj* old = shape->owner;
+				NotifyShapeRemoved(*shape);
 				old->actor->detachShape(*shape->shape);
 				old->shapes.erase(std::remove(old->shapes.begin(), old->shapes.end(), shape), old->shapes.end());
 				shape->owner = nullptr;
@@ -496,18 +497,29 @@ namespace backend::pxw
 				return;
 			}
 
-			size_t simShapes = 0;
+			// Built-in: counts shapes that are neither triggers nor heightfields.
+			size_t massShapes = 0;
 			for (const ShapeObj* shape : b->shapes)
 			{
-				if (shape->shape->getFlags() & physx::PxShapeFlag::eSIMULATION_SHAPE)
+				if (!(shape->shape->getFlags() & physx::PxShapeFlag::eTRIGGER_SHAPE)
+					&& shape->geometry.type != Physics::GeometryType::Terrain)
 				{
-					++simShapes;
+					++massShapes;
 				}
 			}
-			if (simShapes > 0 && b->mass > 0.0f)
+			const physx::PxVec3 overrideCom = ToPx(overrides.centerOfMass);
+			const float mass = b->dynamic->getMass();
+			if (massShapes > 0 && mass > 0.0f)
 			{
-				// Keeps the requested mass and derives the inertia from the attached shapes (uniform density).
-				physx::PxRigidBodyExt::setMassAndUpdateInertia(*b->dynamic, b->mass);
+				// Keeps the current mass; the inertia is computed about the given center of mass.
+				physx::PxRigidBodyExt::setMassAndUpdateInertia(*b->dynamic, mass,
+					overrides.overrideCenterOfMass ? &overrideCom : nullptr);
+			}
+			else if (massShapes == 0)
+			{
+				b->dynamic->setCMassLocalPose(physx::PxTransform(
+					overrides.overrideCenterOfMass ? overrideCom : physx::PxVec3(0.0f)));
+				b->dynamic->setMassSpaceInertiaTensor(physx::PxVec3(1.0f));
 			}
 
 			physx::PxTransform cm = b->dynamic->getCMassLocalPose();
@@ -718,12 +730,27 @@ namespace backend::pxw
 	{
 		b.flags = flags;
 		b.actor->setActorFlag(physx::PxActorFlag::eDISABLE_GRAVITY, (flags & BodyFlags::Gravity) == BodyFlags::None);
+
+		// Like the built-in backend, Simulated adds / removes the actor to / from the scene (static bodies included).
+		if (b.world != nullptr && b.world->scene != nullptr)
+		{
+			const bool wantSimulated = (flags & BodyFlags::Simulated) != BodyFlags::None;
+			if (wantSimulated && !b.inScene)
+			{
+				b.world->scene->addActor(*b.actor);
+				b.inScene = true;
+			}
+			else if (!wantSimulated && b.inScene)
+			{
+				NotifyBodyRemoved(b);
+				b.world->scene->removeActor(*b.actor);
+				b.inScene = false;
+			}
+		}
 		if (b.dynamic == nullptr)
 		{
-			// Static actors always take part in the simulation.
 			return;
 		}
-		b.actor->setActorFlag(physx::PxActorFlag::eDISABLE_SIMULATION, (flags & BodyFlags::Simulated) == BodyFlags::None);
 
 		const bool wantKinematic = (flags & BodyFlags::Kinematic) != BodyFlags::None;
 		if (wantKinematic != IsKinematic(b))
@@ -731,6 +758,11 @@ namespace backend::pxw
 			if (!wantKinematic)
 			{
 				UpdateMeshShapeSimulation(b, false);
+			}
+			else if (b.dynamic->getRigidBodyFlags() & physx::PxRigidBodyFlag::eENABLE_CCD)
+			{
+				// PhysX rejects eKINEMATIC while eENABLE_CCD is set; ApplyCcd below keeps CCD off for kinematic bodies.
+				b.dynamic->setRigidBodyFlag(physx::PxRigidBodyFlag::eENABLE_CCD, false);
 			}
 			b.dynamic->setRigidBodyFlag(physx::PxRigidBodyFlag::eKINEMATIC, wantKinematic);
 			if (wantKinematic)

@@ -1,5 +1,6 @@
 #include "core/Dispatch.h"
 #include "physx/common/PhysXSdk.h"
+#include "physx/common/PxEvents.h"
 #include "physx/common/PxFilter.h"
 #include "physx/common/PxMesh.h"
 #include "physx/common/PxObjects.h"
@@ -95,9 +96,9 @@ namespace backend::pxw
 					return &sphere;
 				case Physics::GeometryType::Capsule:
 				{
-					// Unity passes the total height including both hemispheres; PhysX wants the cylinder half height.
+					// Unity's engine already sends the PhysX half height (cylinder part only) in capsuleGeometry.height.
 					const float radius = Clamp(g.capsuleGeometry.radius);
-					const float halfHeight = Clamp((g.capsuleGeometry.height - 2.0f * radius) * 0.5f);
+					const float halfHeight = Clamp(g.capsuleGeometry.height);
 					capsule = physx::PxCapsuleGeometry(radius, halfHeight);
 					return &capsule;
 				}
@@ -229,6 +230,11 @@ namespace backend::pxw
 				}
 				if (isSim != wantSimulation)
 				{
+					if (isSim)
+					{
+						// Becoming query-only drops the simulation pairs: keep the ids for the pending Exit events.
+						NotifyShapeRemoved(s);
+					}
 					s.shape->setFlag(physx::PxShapeFlag::eSIMULATION_SHAPE, wantSimulation);
 				}
 			}

@@ -82,7 +82,7 @@ namespace backend::pxw
 		float angularDamping = 0.05f;
 		float sleepThreshold = 0.005f;
 		float maxDepenetrationVelocity = 10.0f;
-		float maxLinearVelocity = 100.0f;
+		float maxLinearVelocity = 1e16f; // PhysX default; refreshed from the actor on creation
 		float maxAngularVelocity = 7.0f;
 		uint32_t positionIterations = 6;
 		uint32_t velocityIterations = 1;

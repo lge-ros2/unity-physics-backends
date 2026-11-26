@@ -567,6 +567,8 @@ namespace backend::pxw
 							sample.materialIndex1 = physx::PxBitAndByte(physx::PxHeightFieldMaterial::eHOLE);
 						}
 					}
+					// Built-in sets the tess flag on every sample (holes too: mat0 = 0xFF, mat1 = 0x7F).
+					sample.setTessFlag();
 				}
 			}
 			return true;

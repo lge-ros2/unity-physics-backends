@@ -69,7 +69,7 @@ namespace backend::pxw
 				case Physics::GeometryType::Capsule:
 				{
 					const float radius = Clamp(g.capsuleGeometry.radius);
-					const float halfHeight = Clamp((g.capsuleGeometry.height - 2.0f * radius) * 0.5f);
+					const float halfHeight = Clamp(g.capsuleGeometry.height);
 					capsule = physx::PxCapsuleGeometry(radius, halfHeight);
 					return &capsule;
 				}
@@ -347,7 +347,8 @@ namespace backend::pxw
 			SceneFilter filter(p, mode == Collect::All ? physx::PxQueryHitType::eTOUCH : physx::PxQueryHitType::eBLOCK, exclude,
 				!keepInitialOverlaps);
 			HitGather<physx::PxSweepHit> gather;
-			const physx::PxHitFlags hitFlags = physx::PxHitFlag::ePOSITION | physx::PxHitFlag::eNORMAL | physx::PxHitFlag::eFACE_INDEX;
+			const physx::PxHitFlags hitFlags = physx::PxHitFlag::ePOSITION | physx::PxHitFlag::eNORMAL
+				| physx::PxHitFlag::eFACE_INDEX | p.MeshHitFlags();
 			scene.sweep(geometry, pose, dir, distance, gather, hitFlags,
 				MakeFilterData(p, !keepInitialOverlaps, mode == Collect::Any), &filter);
 			gather.Finish();
@@ -813,7 +814,8 @@ namespace backend::pxw
 				return;
 			}
 
-			physx::PxHitFlags hitFlags = physx::PxHitFlag::ePOSITION | physx::PxHitFlag::eNORMAL | physx::PxHitFlag::eFACE_INDEX;
+			physx::PxHitFlags hitFlags = physx::PxHitFlag::ePOSITION | physx::PxHitFlag::eNORMAL | physx::PxHitFlag::eFACE_INDEX
+				| params.MeshHitFlags();
 			if (cmd.distanceAsDepth)
 			{
 				hitFlags |= physx::PxHitFlag::eMTD;
