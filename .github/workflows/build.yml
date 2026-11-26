@@ -45,6 +45,9 @@ jobs:
           name: windows-x86_64
           path: build/Release/PhysX5Backend.dll
 
+  # A v* tag publishes the libraries twice: as GitHub release assets and inside the commit behind the upm/v* tag.
+  # main only carries the sources; the upm/* commit adds the binaries to the package (Plugins~/linux, Plugins~/windows)
+  # so that a plain UPM git URL ("...git?path=/packages/com.lge-ros2.physics-backend.physx5#upm/v0.1.0") is complete.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [linux, windows]
@@ -52,10 +55,33 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          fetch-depth: 0
+      - name: Tag matches package.json
+        run: |
+          pkg=$(python3 -c "import json;print(json.load(open('packages/com.lge-ros2.physics-backend.physx5/package.json'))['version'])")
+          if [ "v$pkg" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version $pkg"
+            exit 1
+          fi
       - uses: actions/download-artifact@v4
         with:
           path: dist
-      - name: Publish
+      - name: Commit the binaries and tag upm/${{ github.ref_name }}
+        run: |
+          plugins=packages/com.lge-ros2.physics-backend.physx5/Plugins~
+          mkdir -p "$plugins/linux" "$plugins/windows"
+          cp dist/linux-x86_64/libPhysX5Backend.so "$plugins/linux/"
+          cp dist/windows-x86_64/PhysX5Backend.dll "$plugins/windows/"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f "$plugins/linux/libPhysX5Backend.so" "$plugins/windows/PhysX5Backend.dll"
+          git commit -m "release: ${GITHUB_REF_NAME} with prebuilt libraries"
+          git tag "upm/${GITHUB_REF_NAME}"
+          git push origin "upm/${GITHUB_REF_NAME}"
+      - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |

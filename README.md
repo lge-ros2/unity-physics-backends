@@ -19,7 +19,7 @@ Status: **scaffold**. The `PhysX 5` backend registers itself, initializes PhysX 
 Add to `Packages/manifest.json`:
 
 ```json
-"com.lge-ros2.physics-backend.physx5": "https://github.com/lge-ros2/unity-physics-backends.git?path=/packages/com.lge-ros2.physics-backend.physx5"
+"com.lge-ros2.physics-backend.physx5": "https://github.com/lge-ros2/unity-physics-backends.git?path=/packages/com.lge-ros2.physics-backend.physx5#upm/v0.1.0"
 ```
 
 On first load the editor installer copies the native libraries into `Assets/Plugins/PhysX5Backend/linux/` and `.../windows/` (both, so either editor can build a player for the other OS) and asks for an editor restart. Add `Assets/Plugins/PhysX5Backend/` to your `.gitignore`.
@@ -52,7 +52,7 @@ cmake --build native/build --config Release
 cmake --install native/build --config Release   # -> packages/.../Plugins~/windows/
 ```
 
-`.github/workflows/build.yml` builds both flavors; a `v*` tag attaches them to a GitHub release.
+`.github/workflows/build.yml` builds both flavors. The built libraries are not committed to `main`: a `v*` tag (matching `package.json` `version`) makes CI attach them to a GitHub release and add them to a commit tagged `upm/v*`, which is what the UPM git URL points to. Local `cmake --install` still copies the library into the package folder (ignored by git), so a `file:` reference works for development.
 
 Set `-DPHYSX5_DEV_INSTALL_DIR=<project>/Assets/Plugins/PhysX5Backend/linux` to install straight into a Unity project. Restart the editor after replacing the library.
 

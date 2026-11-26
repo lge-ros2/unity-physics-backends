@@ -21,3 +21,7 @@ tests/BackendTestProject/*.slnx
 .idea/
 tests/BackendTestProject/Assets/Plugins/PhysX4RefBackend/
 tests/BackendTestProject/Assets/Plugins/PhysX4RefBackend.meta
+
+# Prebuilt libraries: built by CI and only committed on the upm/v* release tags (git add -f)
+packages/**/Plugins~/**/*.so
+packages/**/Plugins~/**/*.dll
