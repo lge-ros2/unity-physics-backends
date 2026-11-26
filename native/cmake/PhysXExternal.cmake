@@ -129,6 +129,8 @@ if (NOT PHYSX_PREBUILT_LIB_DIR)
 endif()
 target_include_directories(physx_sdk_libs SYSTEM INTERFACE ${PHYSX_INCLUDE_DIRS})
 if (WIN32)
+	# Without PX_PHYSX_STATIC_LIB the PhysX headers declare every API as __declspec(dllimport) (__imp_ symbols).
+	target_compile_definitions(physx_sdk_libs INTERFACE PX_PHYSX_STATIC_LIB)
 	target_link_libraries(physx_sdk_libs INTERFACE ${PHYSX_LIB_FILES} ws2_32 winmm)
 else()
 	# Static libraries reference each other, so wrap them in a link group.
