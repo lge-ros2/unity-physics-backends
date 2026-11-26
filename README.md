@@ -2,6 +2,8 @@
 
 Native physics backends for Unity's GameObject physics, built on the Physics Backend Plugin API (`IUnityPhysicsBackendSystem`, Unity 6.6+). `Rigidbody`, `ArticulationBody`, and `Collider` stay as they are; only the engine underneath changes.
 
+[![Unity](https://img.shields.io/badge/Unity-6.6-black.svg?style=flat&logo=unity)](https://unity.com/) [![C++17](https://img.shields.io/badge/C++-17-blue.svg?style=flat&logo=cplusplus)](https://isocpp.org/) [![C#](https://img.shields.io/badge/C%23-Unity%20package-239120.svg?style=flat&logo=csharp)](https://learn.microsoft.com/dotnet/csharp/) [![CMake](https://img.shields.io/badge/CMake-3.10+-064F8C.svg?style=flat&logo=cmake)](https://cmake.org/) [![PhysX](https://img.shields.io/badge/PhysX-5.6.1-76B900.svg?style=flat&logo=nvidia)](https://github.com/NVIDIA-Omniverse/PhysX) [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-lightgrey.svg?style=flat)](#install-unity-6000630f1-or-newer-linux--windows-x8664) [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Build](https://github.com/lge-ros2/unity-physics-backends/actions/workflows/build.yml/badge.svg)](https://github.com/lge-ros2/unity-physics-backends/actions/workflows/build.yml)
+
 Status: **scaffold**. The `PhysX 5` backend registers itself, initializes PhysX 5.6.1 (`PxFoundation`/`PxPhysics`) and answers every command with a stub, so Unity can select it, but nothing is simulated yet.
 
 ## Layout
