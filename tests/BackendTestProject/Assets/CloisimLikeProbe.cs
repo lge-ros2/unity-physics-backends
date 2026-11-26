@@ -312,6 +312,10 @@ public static class CloisimLikeProbe
 			yield return null; // import finishes over several frames, then SpecifyPose re-enables the links
 			NrLikeRobot.EnableAll(nrIdle);
 			NrLikeRobot.EnableAll(nrDrive);
+			foreach (var ab in nrDrive)
+				if (ab.name.StartsWith("NR_wheel"))
+					sb.AppendLine("[Probe] DRIVES " + ab.name + " x(d=" + ab.xDrive.damping + ",t=" + ab.xDrive.driveType + ") y(d="
+						+ ab.yDrive.damping + ",t=" + ab.yDrive.driveType + ") z(d=" + ab.zDrive.damping + ",t=" + ab.zDrive.driveType + ")");
 			var nrPeak = new float[2];
 			var nrWorst = new string[2];
 			var nrLateSpin = new float[2, 16];
@@ -341,6 +345,22 @@ public static class CloisimLikeProbe
 					+ nrPeak[r].ToString("F3") + " (" + nrWorst[r] + ")" + " dofs=" + list[0].dofCount
 					+ " bumperPos=" + (list[1].dofCount > 0 ? list[1].jointPosition[0].ToString("F4") : "n/a")
 					+ " suspL=" + (list[3].dofCount > 0 ? list[3].jointPosition[0].ToString("F3") : "n/a"));
+					for (var li = 0; li < list.Count; li++)
+					{
+						var lab = list[li];
+						var vs = "";
+						var ps = "";
+						for (var di = 0; di < lab.dofCount; di++)
+						{
+							vs += lab.jointVelocity[di].ToString("F3") + " ";
+							ps += lab.jointPosition[di].ToString("F3") + " ";
+						}
+						sb.AppendLine("[Probe] NR" + (r == 0 ? "idle" : "drive") + " DOFS idx=" + li + " " + lab.name + " type=" + lab.jointType + " dof=" + lab.dofCount + " vel=[" + vs + "] pos=[" + ps + "] angVel=" + lab.angularVelocity.magnitude.ToString("F3"));
+					}
+					foreach (var wab in list)
+						if (wab.name.StartsWith("NR_wheel"))
+							sb.AppendLine("[Probe] NR" + (r == 0 ? "idle" : "drive") + " WHEEL " + wab.name + " dof=" + wab.dofCount + " jointPos=" + (wab.dofCount > 0 ? wab.jointPosition[0].ToString("F3") : "n/a")
+								+ " jointVel=" + (wab.dofCount > 0 ? wab.jointVelocity[0].ToString("F3") : "n/a") + " angVel=" + wab.angularVelocity.magnitude.ToString("F3"));
 					var lateSpins = "";
 					for (var i = 0; i < list.Count; i++)
 						lateSpins += " " + list[i].name.Replace("NR_", "") + "=" + nrLateSpin[r, i].ToString("F2");

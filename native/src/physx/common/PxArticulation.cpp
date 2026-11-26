@@ -210,7 +210,18 @@ namespace backend::pxw
 		{
 			std::vector<std::pair<LinkObj*, uint32_t>> layout;
 			total = 0;
-			for (LinkObj* l : a.links)
+			// PhysX lays the cache out in its own link index order (children grouped per level), which differs from the
+			// creation order when a link has siblings with children of their own (suspension arm + wheel on each side).
+			std::vector<LinkObj*> ordered(a.links.begin(), a.links.end());
+			if (a.inPxScene)
+			{
+				std::stable_sort(ordered.begin(), ordered.end(), [](const LinkObj* x, const LinkObj* y) {
+					const uint32_t ix = x->link != nullptr ? x->link->getLinkIndex() : ~0u;
+					const uint32_t iy = y->link != nullptr ? y->link->getLinkIndex() : ~0u;
+					return ix < iy;
+				});
+			}
+			for (LinkObj* l : ordered)
 			{
 				layout.emplace_back(l, total);
 				total += DofCount(*l);
