@@ -52,7 +52,7 @@ cmake --build native/build --config Release
 cmake --install native/build --config Release   # -> packages/.../Plugins~/windows/
 ```
 
-`.github/workflows/build.yml` builds both flavors. The built libraries are not committed to `main`: a `v*` tag (matching `package.json` `version`) makes CI attach them to a GitHub release and add them to a commit tagged `upm/v*`, which is what the UPM git URL points to. Local `cmake --install` still copies the library into the package folder (ignored by git), so a `file:` reference works for development.
+`.github/workflows/build.yml` builds both flavors. The built libraries are not committed to `main`: a `v*` tag (matching `package.json` `version`, with a `## [x.y.z]` section in the package CHANGELOG.md that becomes the release notes) makes CI attach them to a GitHub release and add them to a commit tagged `upm/v*`, which is what the UPM git URL points to. Local `cmake --install` still copies the library into the package folder (ignored by git), so a `file:` reference works for development.
 
 Set `-DPHYSX5_DEV_INSTALL_DIR=<project>/Assets/Plugins/PhysX5Backend/linux` to install straight into a Unity project. Restart the editor after replacing the library.
 

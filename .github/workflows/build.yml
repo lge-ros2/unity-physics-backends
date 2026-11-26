@@ -69,6 +69,25 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          changelog=packages/com.lge-ros2.physics-backend.physx5/CHANGELOG.md
+          # The "## [x.y.z]" section of this version, without its heading.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' "$changelog" > release_notes.md
+          if ! grep -q '[^[:space:]]' release_notes.md; then
+            echo "CHANGELOG.md has no section for $version"
+            exit 1
+          fi
+          {
+            echo
+            echo "UPM: \`https://github.com/${GITHUB_REPOSITORY}.git?path=/packages/com.lge-ros2.physics-backend.physx5#upm/${GITHUB_REF_NAME}\`"
+          } >> release_notes.md
+          cat release_notes.md
       - name: Commit the binaries and tag upm/${{ github.ref_name }}
         run: |
           plugins=packages/com.lge-ros2.physics-backend.physx5/Plugins~
@@ -84,6 +103,7 @@ jobs:
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
+          body_path: release_notes.md
           files: |
             dist/linux-x86_64/libPhysX5Backend.so
             dist/windows-x86_64/PhysX5Backend.dll
