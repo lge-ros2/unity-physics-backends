@@ -1,4 +1,5 @@
 #include "physx/common/PxFilter.h"
+#include "physx/common/PxArticulation.h"
 
 #include <atomic>
 #include <cstring>
@@ -74,7 +75,15 @@ namespace backend::pxw
 		{
 			return physx::PxFilterFlag::eSUPPRESS;
 		}
-		if (f0.ignorePairID != Physics::FilterData::invalidIgnorePairID
+		// padding marks a link shape whose ignorePairID slot holds the articulation collision group instead.
+		const bool group0 = f0.padding != 0;
+		const bool group1 = f1.padding != 0;
+		if (group0 && group1 && f0.ignorePairID == f1.ignorePairID)
+		{
+			return physx::PxFilterFlag::eSUPPRESS;
+		}
+		if (!group0 && !group1
+			&& f0.ignorePairID != Physics::FilterData::invalidIgnorePairID
 			&& f1.ignorePairID != Physics::FilterData::invalidIgnorePairID
 			&& IsPairIgnored(f0.ignorePairID, f1.ignorePairID))
 		{
@@ -111,6 +120,15 @@ namespace backend::pxw
 			supported |= flags;
 		}
 		data.pairFlags = static_cast<Physics::ShapePairEventFlags>(static_cast<uint16_t>(data.pairFlags) | supported);
+		// Unity's Physics.IgnoreCollision reaches custom backends with ignore ids that are always 0, so CLOiSim-style
+		// "ignore every pair inside a model" cannot be expressed per pair; links of one articulation never collide instead.
+		// FilterData() leaves padding uninitialized, so it is always written here.
+		data.padding = 0;
+		if (shape.ownerLink != nullptr && shape.ownerLink->art != nullptr && shape.ownerLink->art->collisionGroup != 0)
+		{
+			data.padding = 1;
+			data.ignorePairID = shape.ownerLink->art->collisionGroup;
+		}
 		return EncodeFilter(data);
 	}
 
@@ -176,6 +194,17 @@ namespace backend::pxw
 		}
 		g_ignoredCount.store(g_ignored.size(), std::memory_order_relaxed);
 		return removed;
+	}
+
+	uint16_t NextArticulationCollisionGroup()
+	{
+		static std::atomic<uint32_t> next{ 0 };
+		uint16_t group = 0;
+		while (group == 0)
+		{
+			group = static_cast<uint16_t>(next.fetch_add(1, std::memory_order_relaxed) + 1);
+		}
+		return group;
 	}
 
 	void ClearIgnoredPairs()

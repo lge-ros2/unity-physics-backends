@@ -9,7 +9,10 @@ namespace backend::pxw
 	Physics::FilterData DecodeFilter(const physx::PxFilterData& data);
 
 	// Simulation filter data of a shape: its FilterData with the pair flags of Shape::SetSupportedMessages merged in.
+	// Shapes on articulation links additionally carry the articulation's collision group.
 	physx::PxFilterData EncodeShapeFilter(const ShapeObj& shape);
+	// Nonzero group id for a new articulation.
+	uint16_t NextArticulationCollisionGroup();
 	// Pushes EncodeShapeFilter onto the PxShape; re-filters the shape's pairs when the pair flags changed.
 	void UpdateShapeSimulationFilter(ShapeObj& shape);
 

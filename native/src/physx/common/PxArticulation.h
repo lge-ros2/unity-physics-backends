@@ -88,6 +88,8 @@ namespace backend::pxw
 		float sleepThreshold = 0.0f;
 		uint32_t positionIterations = 6;
 		uint32_t velocityIterations = 1;
+		// Shapes of all links share this group and never collide with each other (see EncodeShapeFilter).
+		uint16_t collisionGroup = 0;
 		artic::Cache* cache = nullptr; // lazily created, dropped on every structural change
 	};
 }

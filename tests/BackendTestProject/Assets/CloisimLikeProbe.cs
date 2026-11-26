@@ -212,7 +212,8 @@ public static class CloisimLikeProbe
 			casterAb.jointType = ArticulationJointType.FixedJoint;
 
 			// links with overlapping colliders: root + child + grandchild (non-adjacent to root); CLOiSim ignores such pairs
-			ArticulationBody BuildOverlap(string name, float x, bool ignore)
+			var disabledOverlapBodies = new System.Collections.Generic.List<ArticulationBody>();
+			ArticulationBody BuildOverlap(string name, float x, bool ignore, bool ignoreWhileDisabled = false)
 			{
 				var rootGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
 				rootGo.name = name;
@@ -240,6 +241,16 @@ public static class CloisimLikeProbe
 					cols.Add(c.GetComponent<Collider>());
 					parent = c;
 				}
+				if (ignoreWhileDisabled)
+				{
+					// CLOiSim order: links are disabled while Physics.IgnoreCollision runs, then re-enabled
+					foreach (var col in cols)
+					{
+						var b = col.GetComponent<ArticulationBody>();
+						b.enabled = false;
+						disabledOverlapBodies.Add(b);
+					}
+				}
 				if (ignore)
 				{
 					for (var i = 0; i < cols.Count; i++)
@@ -250,8 +261,11 @@ public static class CloisimLikeProbe
 			}
 			var ovl = BuildOverlap("OVL", -8f, false);
 			var ovlIgnored = BuildOverlap("OVLI", 8f, true);
+			var ovlDisabled = BuildOverlap("OVLD", 0f, true, true);
 
 			yield return null;
+			foreach (var b in disabledOverlapBodies)
+				b.enabled = true;
 			var hit4 = Physics.Raycast(new Vector3(0f, 10f, 50f), Vector3.down, out var h4, 100f);
 			sb.AppendLine("[Probe] raycast primitive floor: hit=" + hit4 + (hit4 ? " pt=" + h4.point + " col=" + h4.collider.name : ""));
 			sb.AppendLine("[Probe] gravity=" + Physics.gravity + " simMode=" + Physics.simulationMode + " fixedDt=" + Time.fixedDeltaTime + " timeScale=" + Time.timeScale);
@@ -355,7 +369,7 @@ public static class CloisimLikeProbe
 				+ " rootVel=" + rootAb.linearVelocity.magnitude.ToString("F3") + " wheel0Vel=" + wheels[0].linearVelocity.magnitude.ToString("F3"));
 
 			// jitter metric: peak-to-peak position / peak speeds of the idle robot over 2 s
-			var tracked = new[] { idleAb, ovl, ovlIgnored };
+			var tracked = new[] { idleAb, ovl, ovlIgnored, ovlDisabled };
 			var minP = new Vector3[tracked.Length];
 			var maxP = new Vector3[tracked.Length];
 			var maxLin = new float[tracked.Length];

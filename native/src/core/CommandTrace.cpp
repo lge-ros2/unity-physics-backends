@@ -221,6 +221,25 @@ namespace backend
 					auto& v = static_cast<ShapeData::SetPose&>(c).value;
 					std::snprintf(out, size, "pos=(%g,%g,%g)", v.pos.x, v.pos.y, v.pos.z);
 				}
+				else if (static_cast<Shape>(id) == Shape::ShouldIgnoreCollision)
+				{
+					auto& v = static_cast<ShapeData::ShouldIgnoreCollision&>(c);
+					std::snprintf(out, size, "ids=(%u,%u)", v.ignoreId0, v.ignoreId1);
+				}
+				else if (static_cast<Shape>(id) == Shape::IgnoreCollision)
+				{
+					auto& v = static_cast<ShapeData::IgnoreCollision&>(c);
+					std::snprintf(out, size, "ids=(%u,%u) value=%d", v.ignoreId0, v.ignoreId1, v.value);
+				}
+				else if (static_cast<Shape>(id) == Shape::CleanupIgnoredColliders)
+				{
+					std::snprintf(out, size, "id=%u", static_cast<ShapeData::CleanupIgnoredColliders&>(c).ignoreID);
+				}
+				else if (static_cast<Shape>(id) == Shape::SetFilterData)
+				{
+					auto& v = static_cast<ShapeData::SetFilterData&>(c).data;
+					std::snprintf(out, size, "belongsTo=0x%x collidesWith=0x%x ignorePairID=%u", v.belongsTo, v.collidesWith, v.ignorePairID);
+				}
 			}
 		}
 	}

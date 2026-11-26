@@ -333,7 +333,7 @@ namespace backend::pxw
 			shape->shape->userData = shape;
 			pin.CommitTo(*shape);
 			ApplyShapeFlags(*shape, cmd.flags, true);
-			shape->shape->setSimulationFilterData(EncodeFilter(shape->filter));
+			shape->shape->setSimulationFilterData(EncodeShapeFilter(*shape));
 			shape->shape->setQueryFilterData(EncodeFilter(shape->filter));
 
 			Register(shape, Kind::Shape, shape, LooseState());

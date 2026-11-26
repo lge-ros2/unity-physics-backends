@@ -185,10 +185,10 @@ namespace backend::pxw
 					}
 					const Physics::FilterData& f0 = e0.shape->filter;
 					const Physics::FilterData& f1 = e1.shape->filter;
-					const bool ignored = f0.ignorePairID != Physics::FilterData::invalidIgnorePairID
-						&& f1.ignorePairID != Physics::FilterData::invalidIgnorePairID && IsPairIgnored(f0.ignorePairID, f1.ignorePairID);
-					const bool layers = !f0.hasCollisionDisabled && !f1.hasCollisionDisabled && LayersCollide(f0, f1);
-					const bool collides = layers && !ignored;
+					physx::PxPairFlags pairFlags;
+					const physx::PxFilterFlags verdict = SimulationFilterShader(0, e0.shape->shape->getSimulationFilterData(), 0,
+						e1.shape->shape->getSimulationFilterData(), pairFlags, nullptr, 0);
+					const bool collides = !(verdict & physx::PxFilterFlag::eSUPPRESS);
 					(collides ? colliding : suppressed)++;
 					if (shown < 40 && collides)
 					{
@@ -200,7 +200,7 @@ namespace backend::pxw
 					}
 				}
 			}
-			BACKEND_LOGF("[diag] selfOverlap art #%d summary: %d overlapping pairs still colliding, %d suppressed (ignored/layers), shapes=%zu",
+			BACKEND_LOGF("[diag] selfOverlap art #%d summary: %d overlapping pairs still colliding, %d suppressed by the filter, shapes=%zu",
 				artIndex, colliding, suppressed, entries.size());
 		}
 

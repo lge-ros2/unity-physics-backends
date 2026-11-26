@@ -3,6 +3,7 @@
 
 #include "core/Dispatch.h"
 #include "physx/common/PhysXSdk.h"
+#include "physx/common/PxFilter.h"
 
 #include "PhysicsWorldCommandData.h"
 
@@ -703,6 +704,7 @@ namespace backend::pxw
 					l.link->detachShape(*shape->shape);
 				}
 				shape->ownerLink = nullptr;
+				shape->shape->setSimulationFilterData(EncodeShapeFilter(*shape));
 				Rebind(shape, LooseState());
 			}
 			l.shapes.clear();
@@ -885,6 +887,7 @@ namespace backend::pxw
 			a->world = world;
 			a->userData = cmd.userData;
 			a->flags = cmd.flags;
+			a->collisionGroup = NextArticulationCollisionGroup();
 			px->userData = a;
 			ApplyArticulationFlags(*a);
 			a->sleepThreshold = px->getSleepThreshold();
@@ -1625,14 +1628,17 @@ namespace backend::pxw
 			}
 
 			ReapplyShapeFlagsForLink(*shape);
+			shape->ownerLink = l;
+			shape->shape->setSimulationFilterData(EncodeShapeFilter(*shape)); // before attaching, so new pairs see the group
 			if (!l->link->attachShape(*shape->shape))
 			{
 				BACKEND_ERRORF("PxRigidActor::attachShape failed for an articulation link");
+				shape->ownerLink = nullptr;
+				shape->shape->setSimulationFilterData(EncodeShapeFilter(*shape));
 				Rebind(shape, LooseState());
 				return;
 			}
 			l->shapes.push_back(shape);
-			shape->ownerLink = l;
 			Rebind(shape, l->art->world->state);
 		}
 
@@ -2415,6 +2421,7 @@ namespace backend::pxw
 		}
 		l->shapes.erase(std::remove(l->shapes.begin(), l->shapes.end(), shape), l->shapes.end());
 		shape->ownerLink = nullptr;
+		shape->shape->setSimulationFilterData(EncodeShapeFilter(*shape));
 		Rebind(shape, LooseState());
 	}
 
