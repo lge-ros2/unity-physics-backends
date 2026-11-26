@@ -8,11 +8,11 @@ Status: **scaffold**. The `PhysX 5` backend registers itself, initializes PhysX 
 
 | Path | Contents |
 |---|---|
-| `native/` | C++ backend (CMake). Output: `libPhysX5Backend.so` |
+| `native/` | C++ backend (CMake). Output: `libPhysX5Backend.so` (Linux) / `PhysX5Backend.dll` (Windows) |
 | `packages/com.lge-ros2.physics-backend.physx5/` | UPM package: runtime info API, editor installer, backend switch menu, build selector |
 | `tests/BackendTestProject/` | Minimal Unity project that references the package via `file:` |
 
-## Install (Unity 6000.6.3f1 or newer, Linux x86_64)
+## Install (Unity 6000.6.3f1 or newer, Linux / Windows x86_64)
 
 Add to `Packages/manifest.json`:
 
@@ -20,7 +20,7 @@ Add to `Packages/manifest.json`:
 "com.lge-ros2.physics-backend.physx5": "https://github.com/lge-ros2/unity-physics-backends.git?path=/packages/com.lge-ros2.physics-backend.physx5"
 ```
 
-On first load the editor installer copies the native library into `Assets/Plugins/PhysX5Backend/linux/` and asks for an editor restart. Add `Assets/Plugins/PhysX5Backend/` to your `.gitignore`.
+On first load the editor installer copies the native libraries into `Assets/Plugins/PhysX5Backend/linux/` and `.../windows/` (both, so either editor can build a player for the other OS) and asks for an editor restart. Add `Assets/Plugins/PhysX5Backend/` to your `.gitignore`.
 
 A backend inside a UPM package is not selectable by Unity (known issue), which is why the installer copies it into `Assets/Plugins`.
 
@@ -40,6 +40,17 @@ cmake --build native/build
 cmake --install native/build   # -> packages/.../Plugins~/linux/
 native/scripts/sync-unity-headers.sh --check   # compare vendored Unity headers with the installed editor
 ```
+
+On Windows (Visual Studio 2022, static CRT; the PhysX 4.1 reference backend is Linux only):
+
+```bat
+git submodule update --init --depth 1 native/third_party/PhysX5
+cmake -S native -B native/build -G "Visual Studio 17 2022" -A x64
+cmake --build native/build --config Release
+cmake --install native/build --config Release   # -> packages/.../Plugins~/windows/
+```
+
+`.github/workflows/build.yml` builds both flavors; a `v*` tag attaches them to a GitHub release.
 
 Set `-DPHYSX5_DEV_INSTALL_DIR=<project>/Assets/Plugins/PhysX5Backend/linux` to install straight into a Unity project. Restart the editor after replacing the library.
 

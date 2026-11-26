@@ -1,1 +1,2 @@
 packages/**/Plugins~/**/*.so filter=lfs diff=lfs merge=lfs -text
+packages/**/Plugins~/**/*.dll filter=lfs diff=lfs merge=lfs -text
