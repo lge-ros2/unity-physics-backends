@@ -204,6 +204,8 @@ namespace backend::pxw
 	void CollectLinkShapesUserData(const WorldObj& world, uint32_t layerMask, std::vector<void*>& out);
 	// Re-evaluates cached filter decisions of articulation links carrying one of the ignore ids.
 	void RefilterLinkShapes(WorldObj& world, uint16_t id0, uint16_t id1);
+	// After every step: advances the wrap offsets of the joint positions (see LinkObj::unwrapOffset).
+	void UpdateJointUnwrap(WorldObj& world);
 	// Handle of the actor a shape is attached to (body or link), null when loose.
 	Handle ShapeOwnerHandle(const ShapeObj& shape);
 	// Engine user data of a registered link handle (does not lock a domain).

@@ -239,8 +239,126 @@ namespace backend::pxw
 			}
 		}
 
+		// Period of the position wrap of a joint, 0 when PhysX does not wrap it.
+		float UnwrapPeriod(const LinkObj& l)
+		{
+			if (l.jointType == JointType::BallAndSocket)
+			{
+				return 2.0f * kPi;
+			}
+			if (l.jointType == JointType::Hinge && compat::kPhysXMajor < 5)
+			{
+				return 4.0f * kPi;
+			}
+			return 0.0f;
+		}
+
+		bool ReadFlatRaw(ArticulationObj& a, JointData what, std::vector<float>& out);
+
 		// Flat per-DOF values of the whole articulation (PhysX cache DOF order). False if unavailable.
+		// Positions are continuous: the wrap offsets are added (see UpdateJointUnwrapOf).
 		bool ReadFlat(ArticulationObj& a, JointData what, std::vector<float>& out)
+		{
+			if (!ReadFlatRaw(a, what, out))
+			{
+				return false;
+			}
+			if (what == JointData::Position && a.inPxScene)
+			{
+				uint32_t total = 0;
+				for (const auto& entry : DofLayout(a, total))
+				{
+					if (UnwrapPeriod(*entry.first) <= 0.0f)
+					{
+						continue;
+					}
+					const uint32_t n = std::min(DofCount(*entry.first), 3u);
+					for (uint32_t i = 0; i < n && entry.second + i < out.size(); ++i)
+					{
+						out[entry.second + i] += entry.first->unwrapOffset[i];
+					}
+				}
+			}
+			return true;
+		}
+
+		// Advances the wrap offsets from the raw positions; call after every step.
+		void UpdateJointUnwrapOf(ArticulationObj& a)
+		{
+			if (!a.inPxScene)
+			{
+				return;
+			}
+			bool any = false;
+			for (const LinkObj* l : a.links)
+			{
+				any = any || (UnwrapPeriod(*l) > 0.0f && DofCount(*l) > 0);
+			}
+			if (!any)
+			{
+				return;
+			}
+			std::vector<float> raw;
+			if (!ReadFlatRaw(a, JointData::Position, raw))
+			{
+				return;
+			}
+			uint32_t total = 0;
+			for (const auto& entry : DofLayout(a, total))
+			{
+				LinkObj& l = *entry.first;
+				const float period = UnwrapPeriod(l);
+				if (period <= 0.0f)
+				{
+					continue;
+				}
+				const uint32_t n = std::min(DofCount(l), 3u);
+				for (uint32_t i = 0; i < n && entry.second + i < raw.size(); ++i)
+				{
+					const float value = raw[entry.second + i];
+					if (l.unwrapInit)
+					{
+						const float jumps = std::round((value - l.unwrapLast[i]) / period);
+						l.unwrapOffset[i] -= jumps * period;
+					}
+					l.unwrapLast[i] = value;
+				}
+				l.unwrapInit = true;
+			}
+		}
+
+		// Positions written by the caller are continuous values: wraps them into what PhysX stores and restarts the
+		// offsets so that reading them back returns the written value.
+		void AdjustWrittenPositions(ArticulationObj& a, size_t start, std::vector<float>& values)
+		{
+			uint32_t total = 0;
+			for (const auto& entry : DofLayout(a, total))
+			{
+				LinkObj& l = *entry.first;
+				const float period = UnwrapPeriod(l);
+				const uint32_t n = std::min(DofCount(l), 3u);
+				if (period <= 0.0f)
+				{
+					continue;
+				}
+				for (uint32_t i = 0; i < n; ++i)
+				{
+					const size_t global = entry.second + i;
+					if (global < start || global - start >= values.size())
+					{
+						continue;
+					}
+					float& v = values[global - start];
+					const float raw = v - period * std::round(v / period);
+					l.unwrapOffset[i] = v - raw;
+					l.unwrapLast[i] = raw;
+					v = raw;
+				}
+				l.unwrapInit = true;
+			}
+		}
+
+		bool ReadFlatRaw(ArticulationObj& a, JointData what, std::vector<float>& out)
 		{
 			uint32_t total = 0;
 			const auto layout = DofLayout(a, total);
@@ -287,9 +405,14 @@ namespace backend::pxw
 				const size_t dofs = a.art->getDofs();
 				artic::CopyState(*a.art, *cache, what);
 				float* data = artic::Data(*cache, what);
+				std::vector<float> adjusted(values, values + n);
+				if (what == JointData::Position)
+				{
+					AdjustWrittenPositions(a, start, adjusted);
+				}
 				for (size_t i = 0; i < n && start + i < dofs; ++i)
 				{
-					data[start + i] = values[i];
+					data[start + i] = adjusted[i];
 				}
 				artic::ApplyState(*a.art, *cache, what);
 				return;
@@ -2462,6 +2585,14 @@ namespace backend::pxw
 					}
 				}
 			}
+		}
+	}
+
+	void UpdateJointUnwrap(WorldObj& world)
+	{
+		for (ArticulationObj* a : world.articulations)
+		{
+			UpdateJointUnwrapOf(*a);
 		}
 	}
 

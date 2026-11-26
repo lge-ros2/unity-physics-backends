@@ -69,6 +69,12 @@ namespace backend::pxw
 		Physics::Pose parentFrame;
 		Physics::Pose childFrame;
 
+		// Continuous joint positions: PhysX wraps spherical joints (and the revolute joints of 4.1) into a fixed range, the
+		// reported position is raw + offset, where the offset is advanced whenever the raw value jumps by a period.
+		float unwrapOffset[3] = { 0.0f, 0.0f, 0.0f };
+		float unwrapLast[3] = { 0.0f, 0.0f, 0.0f };
+		bool unwrapInit = false;
+
 		PendingJointState pendingPosition;
 		PendingJointState pendingVelocity;
 		PendingJointState pendingForce;

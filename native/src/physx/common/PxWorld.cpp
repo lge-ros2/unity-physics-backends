@@ -221,6 +221,7 @@ namespace backend::pxw
 			scene->simulate(cmd.deltaTime);
 			scene->fetchResults(true);
 			FinishStepEvents(*lock.get<WorldObj>());
+			UpdateJointUnwrap(*lock.get<WorldObj>());
 			DiagStep(*lock.get<WorldObj>());
 			cmd.ranSimulation = true;
 		}
