@@ -20,6 +20,7 @@
 #include "PhysicsBodyCommandData.h"
 #include "PhysicsShapeCommandData.h"
 #include "PhysicsJointCommandData.h"
+#include "PhysicsArticulationCommandData.h"
 
 #ifndef FALL_TEST_BACKEND_PATH
 #define FALL_TEST_BACKEND_PATH "libPhysX5Backend.so"
@@ -1092,6 +1093,148 @@ namespace
 	}
 }
 
+namespace
+{
+	// ---- joints on articulation links (FixedJoint.connectedArticulationBody) ----
+
+	Handle MakeArticulation(Handle world, bool fixedRoot)
+	{
+		WorldData::CreateArticulation ca{};
+		ca.flags = (fixedRoot ? Physics::ArticulationFlags::ImmovableRoot : Physics::ArticulationFlags::None)
+			| Physics::ArticulationFlags::DriveLimitsAsForces | Physics::ArticulationFlags::Simulated;
+		Run(world, Context(world, nullptr), World::CreateArticulation, ca);
+		return ca.outArticulation;
+	}
+
+	Handle MakeLink(Handle world, Handle art, Handle parent, const Physics::Pose& pose)
+	{
+		ArticulationData::CreateLink cl{};
+		cl.parentLink = parent;
+		cl.pose = pose;
+		Run(art, Context(world, art), Articulation::CreateLink, cl);
+		Handle link = cl.outNewLink;
+		if (link == nullptr)
+		{
+			return nullptr;
+		}
+		ShapeData::CreateShape cs{};
+		cs.geom = BoxGeom(0.1f, 0.1f, 0.1f);
+		cs.materialPtr = g_material;
+		cs.flags = Physics::ShapeFlags::SceneQuery;
+		Run(nullptr, Context(world, nullptr), Shape::CreateShape, cs);
+		ShapeData::SetFilterData sf{};
+		sf.data.belongsTo = 1;
+		sf.data.collidesWith = 0;
+		Run(cs.value, Context(world, nullptr), Shape::SetFilterData, sf);
+		ArticulationLinkData::AttachShape as{};
+		as.shape = cs.value;
+		as.pose = Physics::Pose();
+		Run(link, Context(world, link), Articulation::AttachShapeToLink, as);
+		ArticulationLinkData::SetMass sm{};
+		sm.value = 2.0f;
+		Run(link, Context(world, link), Articulation::SetLinkMass, sm);
+		ArticulationLinkData::RecomputeMassProperties rp;
+		Run(link, Context(world, link), Articulation::RecomputeLinkMassProperties, rp);
+		return link;
+	}
+
+	void AddToScene(Handle world, Handle obj)
+	{
+		Handle list[1] = { obj };
+		WorldData::AddActorsToScene aa{};
+		aa.actors = list;
+		aa.bufferSize = 1;
+		Run(world, Context(world, nullptr), World::AddActorsToScene, aa);
+	}
+
+	// A body that rests on a joint sleeps; wake it so a missing constraint shows up as a fall.
+	void WakeBody(Handle world, Handle body)
+	{
+		BodyData::WakeUp wu{};
+		Run(body, Context(world, body), Body::WakeUp, wu);
+	}
+
+	Handle ActorOfJoint(Handle world, Handle joint, int index, Physics::ActorType* type = nullptr)
+	{
+		JointData::GetActors ga{};
+		RunJ(world, joint, Joint::GetActors, ga);
+		if (type != nullptr)
+		{
+			*type = ga.actors[index].type;
+		}
+		return ga.actors[index].actor;
+	}
+
+	void LinkJointTest()
+	{
+		std::printf("[g] joints on articulation links\n");
+		Handle world = CreateWorld(-9.81f);
+		Handle art = MakeArticulation(world, true);
+		Handle root = MakeLink(world, art, nullptr, Physics::Pose(0, 5, 0, 0, 0, 0, 1));
+		AddToScene(world, art);
+
+		// a dynamic body hangs from the immovable root link through a fixed joint (the gripper case)
+		Handle body = MakeBox(world, 1.0f, 5.0f, 0.0f, true);
+		Handle joint = CreateJoint(world, root, body, JointType::Fixed, kJointFlags);
+		if (!Check(joint != nullptr, "link: a joint accepts an articulation link"))
+		{
+			DestroyWorld(world);
+			return;
+		}
+		SetFrames(world, joint, Physics::Pose(1.0f, 0, 0, 0, 0, 0, 1), Physics::Pose());
+		Physics::ActorType type0 = Physics::ActorType::Invalid;
+		Check(ActorOfJoint(world, joint, 0, &type0) == root && type0 == Physics::ActorType::Link, "link: GetActors reports the link");
+		Check(ActorOfJoint(world, joint, 1, &type0) == body && type0 == Physics::ActorType::Dynamic, "link: GetActors reports the body");
+		Step(world, 120, kDt);
+		CheckRange(GetPose(world, body).pos.y, 4.9f, 5.1f, "link: the body is held by the link");
+		Check(IsValid(world, joint), "link: constraint valid");
+
+		// a structural change rebuilds the PhysX articulation: the joint follows the new PxArticulationLink
+		Handle child = MakeLink(world, art, root, Physics::Pose(0, 4, 0, 0, 0, 0, 1));
+		Check(child != nullptr, "link: second link added to the live articulation");
+		WakeBody(world, body);
+		Step(world, 120, kDt);
+		Check(IsValid(world, joint), "link: constraint valid after the articulation was rebuilt");
+		CheckRange(GetPose(world, body).pos.y, 4.9f, 5.1f, "link: the body is still held after the rebuild");
+		Check(ActorOfJoint(world, joint, 0) == root, "link: GetActors after the rebuild");
+
+		// a wrong world is refused
+		{
+			Handle other = CreateWorld(0.0f);
+			Handle foreign = CreateJoint(other, root, nullptr, JointType::Fixed, kJointFlags);
+			Check(foreign == nullptr, "link: a link of another world is refused");
+			DestroyWorld(other);
+		}
+
+		// destroying the link kills its joint, the body falls
+		Handle body2 = MakeBox(world, 0.0f, 3.0f, 0.0f, false);
+		Handle joint2 = CreateJoint(world, child, body2, JointType::Fixed, kJointFlags);
+		Check(joint2 != nullptr, "link: joint on the child link");
+		Step(world, 10, kDt);
+		ArticulationData::DestroyLink dl{};
+		dl.value = child;
+		Run(art, Context(world, art), Articulation::DestroyLink, dl);
+		Check(!IsValid(world, joint2), "link: destroying the link invalidates its joint");
+		Check(ActorOfJoint(world, joint2, 0) == nullptr && ActorOfJoint(world, joint2, 1) == nullptr, "link: actors cleared after the link is gone");
+		Check(IsValid(world, joint), "link: the joint of the other link survives");
+		WakeBody(world, body);
+		Step(world, 60, kDt);
+		CheckRange(GetPose(world, body).pos.y, 4.9f, 5.1f, "link: the body of the surviving joint is still held");
+		DestroyJoint(world, joint2);
+
+		// destroying the articulation releases the joint; the body falls
+		WorldData::DestoryArticulation da{};
+		da.value = art;
+		Run(world, Context(world, nullptr), World::DestroyArticulation, da);
+		Check(!IsValid(world, joint), "link: destroying the articulation invalidates its joint");
+		WakeBody(world, body);
+		Step(world, 60, kDt);
+		Check(GetPose(world, body).pos.y < 4.0f, "link: the body falls once the articulation is gone");
+		DestroyJoint(world, joint);
+		DestroyWorld(world);
+	}
+}
+
 int main(int argc, char** argv)
 {
 	const std::string path = argc > 1 ? argv[1] : FALL_TEST_BACKEND_PATH;
@@ -1134,6 +1277,7 @@ int main(int argc, char** argv)
 	DistanceTest();
 	BreakTest();
 	LifetimeTest();
+	LinkJointTest();
 
 	SdkData::ShutdownSdk shutdown;
 	Run(nullptr, Context(), SDK::ShutdownSdk, shutdown);

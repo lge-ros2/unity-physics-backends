@@ -684,6 +684,54 @@ namespace
 			Check(c.lost == 1, "(h) lost touch reported for a pair enabled after it started");
 			DestroyWorld(s.world);
 		}
+		// changing the flags while touching refilters the live pair in place: no lost / found pair, the new flag takes effect
+		{
+			DropScene s = MakeDrop(foundLost, ShapePairEventFlags::None, 30);
+			Step found;
+			Counts total;
+			Check(StepToFirstTouch(s, found, total), "(h) touch before the flag change");
+			for (int i = 0; i < 3; ++i)
+			{
+				Advance(s.world);
+			}
+			ShapeData::SetSupportedMessages sm{};
+			sm.flags = ShapePairEventFlags::NotifyContactPoints;
+			sm.layer = 0;
+			Run(s.ball.shape, Context(s.world, s.ball.body), Shape::SetSupportedMessages, sm);
+			Counts c;
+			for (int i = 0; i < 10; ++i)
+			{
+				Accumulate(c, Advance(s.world));
+			}
+			Check(c.first == 0 && c.lost == 0, "(h) a flag change on a touching pair reports no lost / found touch");
+			// the refiltered pair still reports its end
+			SetVelocity(s.ball, Physics::Vec3(0.0f, 5.0f, 0.0f));
+			Counts after;
+			for (int i = 0; i < 10; ++i)
+			{
+				Accumulate(after, Advance(s.world));
+			}
+			Check(after.lost == 1 && after.first == 0, "(h) the pair refiltered in place reports its lost touch once");
+			DestroyWorld(s.world);
+		}
+		// persist events switched on while touching start right away (the pair is registered again for them)
+		{
+			DropScene s = MakeDrop(foundLost, ShapePairEventFlags::None, 40);
+			Step found;
+			Counts total;
+			Check(StepToFirstTouch(s, found, total), "(h) touch before enabling persist");
+			ShapeData::SetSupportedMessages sm{};
+			sm.flags = ShapePairEventFlags::NotifyTouchPersists;
+			sm.layer = 0;
+			Run(s.ball.shape, Context(s.world, s.ball.body), Shape::SetSupportedMessages, sm);
+			Counts c;
+			for (int i = 0; i < 10; ++i)
+			{
+				Accumulate(c, Advance(s.world));
+			}
+			Check(c.persist >= 6, "(h) persist enabled while touching reports persisting contacts");
+			DestroyWorld(s.world);
+		}
 	}
 
 	void TestContactRemoval()
@@ -965,7 +1013,8 @@ namespace
 		Run(&bogus, Context(), World::GetLastSimulationStats, stats);
 		Check(stats.value.dynamicBodies == 0, "(e) stats of an unknown world are zero");
 
-		// events accumulated over several steps without a get are delivered together
+		// results of steps that were never fetched are dropped when the next step starts (scenes without listeners
+		// must not accumulate events): only the last step is delivered, the touch found long before is gone
 		DropScene u = MakeDrop(AllContactEvents(), ShapePairEventFlags::None, 10);
 		for (int i = 0; i < 90; ++i)
 		{
@@ -974,7 +1023,17 @@ namespace
 		const Step batch = Fetch(u.world);
 		Counts c;
 		Accumulate(c, batch);
-		Check(c.first == 1 && c.persist > 5, "(e) several steps without get are delivered in one batch");
+		Check(c.first == 0 && c.persist <= 1, "(e) results of unfetched steps are dropped");
+		// fetching every step still delivers everything
+		DropScene f = MakeDrop(AllContactEvents(), ShapePairEventFlags::None, 10);
+		Counts all;
+		for (int i = 0; i < 90; ++i)
+		{
+			Simulate(f.world);
+			Accumulate(all, Fetch(f.world));
+		}
+		Check(all.first == 1 && all.persist > 5, "(e) fetching every step delivers the touch and its persists");
+		DestroyWorld(f.world);
 		DestroyWorld(u.world);
 		DestroyWorld(s.world);
 	}

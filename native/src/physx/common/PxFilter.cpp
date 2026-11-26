@@ -1,10 +1,14 @@
 #include "physx/common/PxFilter.h"
+#include "core/Dispatch.h"
 #include "physx/common/PxArticulation.h"
 
 #include <atomic>
 #include <cstring>
+#include <deque>
+#include <mutex>
 #include <set>
 #include <shared_mutex>
+#include <vector>
 #include <utility>
 
 namespace backend::pxw
@@ -59,6 +63,39 @@ namespace backend::pxw
 		return aSeesB && bSeesA;
 	}
 
+	namespace
+	{
+		// Unity's rules for sweep based CCD (the body flags are set by the body code, this decides which pairs may sweep):
+		// Continuous: against static geometry only; ContinuousDynamic: also against dynamic bodies; Discrete and
+		// ContinuousSpeculative: no sweep (speculative CCD is a body flag). Statics and kinematics count as static geometry.
+		bool CcdPairEnabled(const Physics::FilterData& f0, const Physics::FilterData& f1,
+			physx::PxFilterObjectAttributes attributes0, physx::PxFilterObjectAttributes attributes1)
+		{
+			using Physics::CollisionDetectionMode;
+			const auto m0 = static_cast<CollisionDetectionMode>(f0.ccdMode);
+			const auto m1 = static_cast<CollisionDetectionMode>(f1.ccdMode);
+			if (m0 == CollisionDetectionMode::Discrete && m1 == CollisionDetectionMode::Discrete)
+			{
+				// Nothing asks for a sweep. The flag is harmless here (no body has eENABLE_CCD unless the engine
+				// forgot to put the mode into the filter data, in which case the old always-on behavior is kept).
+				return true;
+			}
+			const auto sweeps = [](CollisionDetectionMode m) {
+				return m == CollisionDetectionMode::Continuous || m == CollisionDetectionMode::ContinuousDynamic;
+			};
+			const auto isStaticLike = [](physx::PxFilterObjectAttributes a) {
+				return physx::PxGetFilterObjectType(a) == physx::PxFilterObjectType::eRIGID_STATIC || physx::PxFilterObjectIsKinematic(a);
+			};
+			const bool static0 = isStaticLike(attributes0);
+			const bool static1 = isStaticLike(attributes1);
+			if (static0 != static1)
+			{
+				return static0 ? sweeps(m1) : sweeps(m0);
+			}
+			return m0 == CollisionDetectionMode::ContinuousDynamic || m1 == CollisionDetectionMode::ContinuousDynamic;
+		}
+	}
+
 	physx::PxFilterFlags SimulationFilterShader(
 		physx::PxFilterObjectAttributes attributes0, physx::PxFilterData filterData0,
 		physx::PxFilterObjectAttributes attributes1, physx::PxFilterData filterData1,
@@ -102,7 +139,11 @@ namespace backend::pxw
 			| static_cast<uint16_t>(Physics::ShapePairEventFlags::NextFree);
 		const uint16_t requested = (static_cast<uint16_t>(f0.pairFlags) | static_cast<uint16_t>(f1.pairFlags)) & ~kUnsupported;
 		const physx::PxPairFlags notify(requested);
-		pairFlags = physx::PxPairFlag::eCONTACT_DEFAULT | physx::PxPairFlag::eDETECT_CCD_CONTACT | notify;
+		pairFlags = physx::PxPairFlags(physx::PxPairFlag::eCONTACT_DEFAULT) | notify;
+		if (CcdPairEnabled(f0, f1, attributes0, attributes1))
+		{
+			pairFlags |= physx::PxPairFlag::eDETECT_CCD_CONTACT;
+		}
 		if (notify & (physx::PxPairFlag::eNOTIFY_TOUCH_FOUND | physx::PxPairFlag::eNOTIFY_TOUCH_PERSISTS))
 		{
 			// Pre-solver velocities give the engine the relative velocity of the impact.
@@ -140,12 +181,20 @@ namespace backend::pxw
 		{
 			return;
 		}
+		// No PxScene::resetFiltering in general: setSimulationFilterData marks the shape's interactions eFILTER_STATE dirty
+		// (ShapeSim::onFilterDataChange, 4.1 and 5.x), the next step runs the filter shader again for them and
+		// NPhaseCore::refilterInteraction forwards changed pair flags to the live interaction (setPairFlags).
+		// resetFiltering would instead drop and recreate every pair of the shape: spurious lost / found touches
+		// (OnCollisionExit+Enter, OnTriggerExit+Enter) and lost warm starting.
 		shape.shape->setSimulationFilterData(newData);
 
-		// Existing pairs keep their old pair flags until they are filtered again.
-		const bool pairFlagsChanged = DecodeFilter(oldData).pairFlags != DecodeFilter(newData).pairFlags;
+		// The one exception: PhysX only registers a touching pair for persist events when the touch is found, so
+		// eNOTIFY_TOUCH_PERSISTS switched on for a pair that already touches would stay silent until the next touch.
+		constexpr uint16_t kPersists = static_cast<uint16_t>(Physics::ShapePairEventFlags::NotifyTouchPersists);
+		const bool persistsAdded = (static_cast<uint16_t>(DecodeFilter(newData).pairFlags) & kPersists) != 0
+			&& (static_cast<uint16_t>(DecodeFilter(oldData).pairFlags) & kPersists) == 0;
 		const BodyObj* owner = shape.owner;
-		if (pairFlagsChanged && owner != nullptr && owner->inScene && owner->world != nullptr && owner->world->scene != nullptr)
+		if (persistsAdded && owner != nullptr && owner->inScene && owner->world != nullptr && owner->world->scene != nullptr)
 		{
 			physx::PxShape* px = shape.shape;
 			owner->world->scene->resetFiltering(*owner->actor, &px, 1);
@@ -196,15 +245,55 @@ namespace backend::pxw
 		return removed;
 	}
 
+	namespace
+	{
+		// Ids 1..65535 (0 = no group). Released ids are reused oldest first and an id is never handed out twice while it is live.
+		std::mutex g_groupMutex;
+		std::deque<uint16_t> g_freeGroups;
+		std::vector<bool> g_groupInUse(65536, false);
+		uint32_t g_nextFreshGroup = 1;
+	}
+
 	uint16_t NextArticulationCollisionGroup()
 	{
-		static std::atomic<uint32_t> next{ 0 };
+		std::lock_guard<std::mutex> lock(g_groupMutex);
 		uint16_t group = 0;
-		while (group == 0)
+		if (g_nextFreshGroup <= 0xffffu)
 		{
-			group = static_cast<uint16_t>(next.fetch_add(1, std::memory_order_relaxed) + 1);
+			group = static_cast<uint16_t>(g_nextFreshGroup++);
 		}
+		else if (!g_freeGroups.empty())
+		{
+			group = g_freeGroups.front();
+			g_freeGroups.pop_front();
+		}
+		if (group == 0)
+		{
+			static bool warned = false;
+			if (!warned)
+			{
+				warned = true;
+				BACKEND_WARNF("More than 65535 live articulations: the links of the extra ones collide with each other");
+			}
+			return 0;
+		}
+		g_groupInUse[group] = true;
 		return group;
+	}
+
+	void ReleaseArticulationCollisionGroup(uint16_t group)
+	{
+		if (group == 0)
+		{
+			return;
+		}
+		std::lock_guard<std::mutex> lock(g_groupMutex);
+		if (!g_groupInUse[group])
+		{
+			return;
+		}
+		g_groupInUse[group] = false;
+		g_freeGroups.push_back(group);
 	}
 
 	void ClearIgnoredPairs()

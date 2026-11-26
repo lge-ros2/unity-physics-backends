@@ -26,7 +26,10 @@ namespace backend::pxw
 	{
 		physx::PxJoint* joint = nullptr; // null once an actor of the joint was destroyed
 		WorldObj* world = nullptr;
-		BodyObj* body[2] = { nullptr, nullptr }; // null = fixed to the world
+		BodyObj* body[2] = { nullptr, nullptr }; // null = fixed to the world (or an articulation link, see link)
+		// Articulation link handle used as actor instead of a body. A handle, not a pointer: it is validated with
+		// Lookup(Kind::Link) on every use, so a link that was freed without telling the joint cannot dangle.
+		Handle link[2] = { nullptr, nullptr };
 		void* userData = nullptr;
 		Physics::JointType type = Physics::JointType::Invalid;
 		Physics::JointFlags flags = Physics::JointFlags::None;
@@ -61,6 +64,11 @@ namespace backend::pxw
 	// Caller holds the world domain.
 	// Releases the PhysX joints attached to a body that is about to be destroyed; the handles stay valid but report an invalid constraint.
 	void DetachJointsFromBodyLocked(BodyObj* body);
+	// Releases the PhysX joints attached to an articulation link whose wrapper is about to be freed (FreeLinkWrapper).
+	void DetachJointsFromLinkLocked(LinkObj* link);
+	// After the PhysX articulation was rebuilt (links got new PxArticulationLink objects), before it is added to the scene again:
+	// points the joints that use its links at the new PhysX links. Joints of links that no longer exist are released.
+	void RebindJointsOfArticulationLocked(ArticulationObj& art);
 	// Destroys every joint of a world that is about to be destroyed.
 	void DestroyJointsOfWorldLocked(WorldObj* world);
 

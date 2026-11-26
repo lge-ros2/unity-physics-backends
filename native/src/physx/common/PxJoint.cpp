@@ -2,6 +2,7 @@
 
 #include "core/Dispatch.h"
 #include "physx/common/PhysXSdk.h"
+#include "physx/common/PxArticulation.h"
 
 #include "PxJointCompat.h"
 
@@ -384,17 +385,51 @@ namespace backend::pxw
 					b = nullptr;
 				}
 			}
+			j.link[0] = nullptr;
+			j.link[1] = nullptr;
 		}
 
-		void Link(JointObj& j, BodyObj* b0, BodyObj* b1)
+		// One side of a joint: nothing (world anchor), a body or an articulation link.
+		struct Anchor
 		{
-			j.body[0] = b0;
-			j.body[1] = b1;
-			for (BodyObj* b : j.body)
+			BodyObj* body = nullptr;
+			LinkObj* link = nullptr;
+
+			physx::PxRigidActor* actor() const
 			{
-				if (b != nullptr)
+				if (body != nullptr)
 				{
-					b->joints.push_back(&j);
+					return body->actor;
+				}
+				return link != nullptr ? link->link : nullptr;
+			}
+
+			bool dynamic() const
+			{
+				return link != nullptr || (body != nullptr && !body->isStatic);
+			}
+
+			bool same(const Anchor& other) const
+			{
+				return (body != nullptr || link != nullptr) && body == other.body && link == other.link;
+			}
+		};
+
+		LinkObj* LiveLink(const JointObj& j, int i)
+		{
+			return j.link[i] != nullptr ? static_cast<LinkObj*>(Lookup(j.link[i], Kind::Link)) : nullptr;
+		}
+
+		void Link(JointObj& j, const Anchor& a0, const Anchor& a1)
+		{
+			const Anchor* anchors[2] = { &a0, &a1 };
+			for (int i = 0; i < 2; ++i)
+			{
+				j.body[i] = anchors[i]->body;
+				j.link[i] = anchors[i]->link;  // LinkObj handle = its address
+				if (j.body[i] != nullptr)
+				{
+					j.body[i]->joints.push_back(&j);
 				}
 			}
 		}
@@ -412,38 +447,40 @@ namespace backend::pxw
 			delete j;
 		}
 
-		// Resolves a body handle of the given world. Null is allowed (world anchor); false when the handle is foreign.
-		bool ResolveBody(Handle h, const WorldObj* world, BodyObj*& out)
+		// Resolves a body or articulation link handle of the given world. Null is allowed (world anchor); false when the
+		// handle is foreign, a dead link or not an actor.
+		bool ResolveActor(Handle h, const WorldObj* world, Anchor& out)
 		{
-			out = nullptr;
+			out = Anchor();
 			if (h == nullptr)
 			{
 				return true;
 			}
-			auto* body = static_cast<BodyObj*>(Lookup(h, Kind::Body));
-			if (body == nullptr || body->world != world)
+			if (auto* body = static_cast<BodyObj*>(Lookup(h, Kind::Body)))
 			{
-				return false;
+				if (body->world != world)
+				{
+					return false;
+				}
+				out.body = body;
+				return true;
 			}
-			out = body;
-			return true;
+			if (auto* link = static_cast<LinkObj*>(Lookup(h, Kind::Link)))
+			{
+				if (link->link == nullptr || link->dead || link->art == nullptr || link->art->world != world)
+				{
+					return false;
+				}
+				out.link = link;
+				return true;
+			}
+			return false;
 		}
 
 		// PhysX needs two different actors, at least one of them dynamic.
-		bool ValidActors(const BodyObj* b0, const BodyObj* b1)
+		bool ValidActors(const Anchor& a0, const Anchor& a1)
 		{
-			if (b0 != nullptr && b0 == b1)
-			{
-				return false;
-			}
-			const bool dynamic0 = b0 != nullptr && !b0->isStatic;
-			const bool dynamic1 = b1 != nullptr && !b1->isStatic;
-			return dynamic0 || dynamic1;
-		}
-
-		physx::PxRigidActor* ActorOf(const BodyObj* b)
-		{
-			return b != nullptr ? b->actor : nullptr;
+			return !a0.same(a1) && (a0.dynamic() || a1.dynamic());
 		}
 
 		physx::PxJoint* CreateNative(physx::PxPhysics& physics, JointType type, physx::PxRigidActor* a0, physx::PxRigidActor* a1)
@@ -475,11 +512,10 @@ namespace backend::pxw
 			}
 			WorldObj* world = lock.get<WorldObj>();
 
-			BodyObj* b0 = nullptr;
-			BodyObj* b1 = nullptr;
-			if (!ResolveBody(cmd.body0, world, b0) || !ResolveBody(cmd.body1, world, b1) || !ValidActors(b0, b1))
+			Anchor b0, b1;
+			if (!ResolveActor(cmd.body0, world, b0) || !ResolveActor(cmd.body1, world, b1) || !ValidActors(b0, b1))
 			{
-				BACKEND_WARNF("World::CreateJoint: the joint needs two different bodies of this world, at least one of them non-static");
+				BACKEND_WARNF("World::CreateJoint: the joint needs two different bodies or articulation links of this world, at least one of them non-static");
 				return;
 			}
 
@@ -488,7 +524,7 @@ namespace backend::pxw
 			{
 				return;
 			}
-			physx::PxJoint* native = CreateNative(*physics, cmd.type, ActorOf(b0), ActorOf(b1));
+			physx::PxJoint* native = CreateNative(*physics, cmd.type, b0.actor(), b1.actor());
 			if (native == nullptr)
 			{
 				BACKEND_WARNF("World::CreateJoint: unsupported joint type %d", static_cast<int>(cmd.type));
@@ -618,14 +654,14 @@ namespace backend::pxw
 
 		void SetActors(JointObj& j, jd::SetActors& cmd)
 		{
-			BodyObj* b[2] = { nullptr, nullptr };
-			if (j.joint == nullptr || !ResolveBody(cmd.actors[0].actor, j.world, b[0])
-				|| !ResolveBody(cmd.actors[1].actor, j.world, b[1]) || !ValidActors(b[0], b[1]))
+			Anchor b[2];
+			if (j.joint == nullptr || !ResolveActor(cmd.actors[0].actor, j.world, b[0])
+				|| !ResolveActor(cmd.actors[1].actor, j.world, b[1]) || !ValidActors(b[0], b[1]))
 			{
 				BACKEND_WARNF("Joint::SetActors: invalid actors");
 				return;
 			}
-			j.joint->setActors(ActorOf(b[0]), ActorOf(b[1]));
+			j.joint->setActors(b[0].actor(), b[1].actor());
 			Unlink(j);
 			Link(j, b[0], b[1]);
 		}
@@ -635,6 +671,14 @@ namespace backend::pxw
 			for (int i = 0; i < 2; ++i)
 			{
 				const BodyObj* b = j.body[i];
+				if (j.link[i] != nullptr)
+				{
+					const LinkObj* l = LiveLink(j, i);
+					cmd.actors[i].actor = l != nullptr ? j.link[i] : nullptr;
+					cmd.actors[i].userData = l != nullptr ? l->userData : nullptr;
+					cmd.actors[i].type = l != nullptr ? Physics::ActorType::Link : Physics::ActorType::Invalid;
+					continue;
+				}
 				cmd.actors[i].actor = const_cast<BodyObj*>(b);
 				cmd.actors[i].userData = b != nullptr ? b->userData : nullptr;
 				cmd.actors[i].type = b == nullptr ? Physics::ActorType::Invalid
@@ -650,6 +694,14 @@ namespace backend::pxw
 					&& !(b->dynamic->getRigidBodyFlags() & physx::PxRigidBodyFlag::eKINEMATIC))
 				{
 					b->dynamic->wakeUp();
+				}
+			}
+			for (int i = 0; i < 2; ++i)
+			{
+				const LinkObj* l = LiveLink(j, i);
+				if (l != nullptr && l->link != nullptr && l->art != nullptr && l->art->inPxScene)
+				{
+					l->link->getArticulation().wakeUp();
 				}
 			}
 		}
@@ -854,6 +906,69 @@ namespace backend::pxw
 			Unlink(*j);
 		}
 		body->joints.clear();
+	}
+
+	void DetachJointsFromLinkLocked(LinkObj* link)
+	{
+		if (link == nullptr || link->art == nullptr || link->art->world == nullptr)
+		{
+			return;
+		}
+		for (JointObj* j : link->art->world->joints)
+		{
+			if (j->link[0] == link || j->link[1] == link)
+			{
+				ReleaseNative(*j);
+				Unlink(*j);
+			}
+		}
+	}
+
+	void RebindJointsOfArticulationLocked(ArticulationObj& art)
+	{
+		if (art.world == nullptr)
+		{
+			return;
+		}
+		// PhysX nulls the actor of a joint when that actor is released, so the PxJoint (frames, limits, drives) survives the
+		// rebuild of the articulation; it only has to be handed the new PxArticulationLink objects.
+		for (JointObj* j : art.world->joints)
+		{
+			bool touches = false;
+			for (int i = 0; i < 2; ++i)
+			{
+				const LinkObj* l = LiveLink(*j, i);
+				touches = touches || (l != nullptr && l->art == &art);
+			}
+			if (!touches || j->joint == nullptr)
+			{
+				continue;
+			}
+			physx::PxRigidActor* actors[2] = { nullptr, nullptr };
+			bool alive = true;
+			for (int i = 0; i < 2; ++i)
+			{
+				if (j->link[i] != nullptr)
+				{
+					const LinkObj* l = LiveLink(*j, i);
+					actors[i] = l != nullptr && !l->dead ? l->link : nullptr;
+					alive = alive && actors[i] != nullptr;
+				}
+				else if (j->body[i] != nullptr)
+				{
+					actors[i] = j->body[i]->actor;
+				}
+			}
+			if (alive)
+			{
+				j->joint->setActors(actors[0], actors[1]);
+			}
+			else
+			{
+				ReleaseNative(*j);
+				Unlink(*j);
+			}
+		}
 	}
 
 	void DestroyJointsOfWorldLocked(WorldObj* world)

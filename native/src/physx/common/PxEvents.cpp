@@ -33,8 +33,9 @@ namespace backend::pxw
 
 	namespace
 	{
-		constexpr size_t kMaxPendingBodyPairs = 1u << 20;
-		constexpr size_t kMaxPendingTriggers = 1u << 20;
+		// Per step cap of every result array (results of a step that was not fetched are dropped at the next step, so
+		// these only bound a single step). A body pair is stored whole or not at all.
+		constexpr size_t kMaxPending = 1u << 20;
 
 		Physics::EngineObjectId ReadId(const void* userData)
 		{
@@ -68,6 +69,12 @@ namespace backend::pxw
 				return bodyPairs.empty() && triggers.empty() && jointBreaks.empty();
 			}
 
+			// Capacity is released too: a burst must not keep its memory forever.
+			void Clear()
+			{
+				*this = Buffers();
+			}
+
 			void Link()
 			{
 				for (size_t i = 0; i < bodyPairs.size(); ++i)
@@ -96,6 +103,54 @@ namespace backend::pxw
 		Buffers pending;	// collected by the callbacks, handed out by the next GetLastSimulationStepResults
 		Buffers published;	// storage behind the pointers of the last GetLastSimulationStepResults
 		bool warnedOverflow = false;
+		bool warnedUnfetched = false;
+		bool collecting = false;	// events of the current step have started to arrive
+		bool unfetched = false;		// the results of the last finished step were not fetched yet
+
+		// First event of a step: results of the previous step that nobody fetched are dropped, so scenes without
+		// listeners (nobody calls GetLastSimulationStepResults) do not accumulate events.
+		void BeginCollect()
+		{
+			if (collecting)
+			{
+				return;
+			}
+			collecting = true;
+			if (unfetched)
+			{
+				DiscardUnfetched();
+			}
+		}
+
+		void DiscardUnfetched()
+		{
+			unfetched = false;
+			if (pending.Empty() && pending.shapePairs.empty())
+			{
+				return;
+			}
+			if (!warnedUnfetched)
+			{
+				warnedUnfetched = true;
+				BACKEND_WARNF("Simulation events are not fetched (GetLastSimulationStepResults); dropping the events of unfetched steps");
+			}
+			pending.Clear();
+		}
+
+		bool CanStoreContacts(size_t shapePairCount, size_t pointCount)
+		{
+			if (pending.bodyPairs.size() >= kMaxPending || pending.shapePairs.size() + shapePairCount > kMaxPending
+				|| pending.points.size() + pointCount > kMaxPending)
+			{
+				if (!warnedOverflow)
+				{
+					warnedOverflow = true;
+					BACKEND_WARNF("Too many contact events in one step; dropping the excess");
+				}
+				return false;
+			}
+			return true;
+		}
 
 		// A removed object is only identified through the removal tables; a live one through its userData.
 		Ref ResolveShape(const physx::PxShape* shape, bool removed) const
@@ -155,10 +210,11 @@ namespace backend::pxw
 
 		void onConstraintBreak(physx::PxConstraintInfo* constraints, physx::PxU32 count) override
 		{
+			BeginCollect();
 			for (physx::PxU32 i = 0; i < count; ++i)
 			{
 				const Handle handle = JointHandleFromConstraint(constraints[i].constraint);
-				if (handle == nullptr)
+				if (handle == nullptr || pending.jointBreaks.size() >= kMaxPending)
 				{
 					continue;
 				}
@@ -178,13 +234,14 @@ namespace backend::pxw
 
 		void onContact(const physx::PxContactPairHeader& header, const physx::PxContactPair* pairs, physx::PxU32 nbPairs) override
 		{
-			if (pending.bodyPairs.size() >= kMaxPendingBodyPairs)
+			BeginCollect();
+			size_t contactTotal = 0;
+			for (physx::PxU32 i = 0; i < nbPairs; ++i)
 			{
-				if (!warnedOverflow)
-				{
-					warnedOverflow = true;
-					BACKEND_WARNF("Contact events are not fetched (GetLastSimulationStepResults); dropping new ones");
-				}
+				contactTotal += pairs[i].contactCount;
+			}
+			if (!CanStoreContacts(nbPairs, contactTotal))
+			{
 				return;
 			}
 
@@ -276,6 +333,7 @@ namespace backend::pxw
 
 		void onTrigger(physx::PxTriggerPair* pairs, physx::PxU32 count) override
 		{
+			BeginCollect();
 			for (physx::PxU32 i = 0; i < count; ++i)
 			{
 				const physx::PxTriggerPair& pair = pairs[i];
@@ -304,8 +362,13 @@ namespace backend::pxw
 					continue;
 				}
 
-				if (pending.triggers.size() >= kMaxPendingTriggers)
+				if (pending.triggers.size() >= kMaxPending)
 				{
+					if (!warnedOverflow)
+					{
+						warnedOverflow = true;
+						BACKEND_WARNF("Too many trigger events in one step; dropping the excess");
+					}
 					return;
 				}
 				const Ref trigger = ResolveShape(pair.triggerShape, triggerRemoved);
@@ -344,8 +407,16 @@ namespace backend::pxw
 	{
 		if (world.events != nullptr)
 		{
-			world.events->removedShapes.clear();
-			world.events->removedActors.clear();
+			WorldEvents& events = *world.events;
+			events.removedShapes.clear();
+			events.removedActors.clear();
+			// A step without any event must not leave older, unfetched results to be mistaken for its own.
+			if (!events.collecting && events.unfetched)
+			{
+				events.DiscardUnfetched();
+			}
+			events.collecting = false;
+			events.unfetched = true;
 		}
 	}
 
@@ -410,7 +481,11 @@ namespace backend::pxw
 	{
 		if (world.events != nullptr)
 		{
-			world.events->pending.jointBreaks.push_back(event);
+			world.events->BeginCollect();
+			if (world.events->pending.jointBreaks.size() < kMaxPending)
+			{
+				world.events->pending.jointBreaks.push_back(event);
+			}
 		}
 	}
 
@@ -442,6 +517,7 @@ namespace backend::pxw
 			// Results not released by the caller are replaced; their pointers become invalid here.
 			events->published = std::move(events->pending);
 			events->pending = Buffers();
+			events->unfetched = false;
 			Buffers& out = events->published;
 			out.Link();
 

@@ -12,7 +12,10 @@ namespace backend::pxw
 	// Shapes on articulation links additionally carry the articulation's collision group.
 	physx::PxFilterData EncodeShapeFilter(const ShapeObj& shape);
 	// Nonzero group id for a new articulation.
+	// Returns 0 (no group) only when all 65535 ids are live.
 	uint16_t NextArticulationCollisionGroup();
+	// Gives the id of a destroyed articulation back (call from the articulation destroy path; 0 and unknown ids are ignored).
+	void ReleaseArticulationCollisionGroup(uint16_t group);
 	// Pushes EncodeShapeFilter onto the PxShape; re-filters the shape's pairs when the pair flags changed.
 	void UpdateShapeSimulationFilter(ShapeObj& shape);
 
