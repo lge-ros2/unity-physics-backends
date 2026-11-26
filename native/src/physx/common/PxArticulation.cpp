@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bitset>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -265,7 +266,7 @@ namespace backend::pxw
 		// Position of an axis among the DOFs of its link (the index into the per-link DOF values).
 		uint32_t DofOrdinal(const LinkObj& l, int axis)
 		{
-			return static_cast<uint32_t>(__builtin_popcount(DofMask(l) & ((1u << axis) - 1u)));
+			return static_cast<uint32_t>(std::bitset<32>(DofMask(l) & ((1u << axis) - 1u)).count()); // __builtin_popcount is GCC only
 		}
 
 		void ResetUnwrap(LinkObj& l)
