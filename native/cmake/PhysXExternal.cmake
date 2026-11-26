@@ -50,6 +50,14 @@ if (WIN32)
 	set(PHYSX_TARGET_PLATFORM windows)
 	set(PHYSX_LIB_PREFIX "")
 	set(PHYSX_LIB_SUFFIX ".lib")
+	# compiler/public forces PUBLIC_RELEASE=1, and the Windows project then copies freeglut.dll (only needed by the
+	# PhysX samples, which are not built) from $PM_freeglut_PATH/bin/win64 and fails when the file is missing.
+	# Empty placeholders satisfy the copy.
+	set(PHYSX_FREEGLUT_STUB ${CMAKE_BINARY_DIR}/physx-stubs/freeglut)
+	file(MAKE_DIRECTORY ${PHYSX_FREEGLUT_STUB}/bin/win64)
+	file(WRITE ${PHYSX_FREEGLUT_STUB}/bin/win64/freeglut.dll "")
+	file(WRITE ${PHYSX_FREEGLUT_STUB}/bin/win64/freeglutd.dll "")
+	list(APPEND PHYSX_ENV PM_freeglut_PATH=${PHYSX_FREEGLUT_STUB})
 	set(PHYSX_PLATFORM_ARGS -DNV_USE_STATIC_WINCRT=ON -DPX_GENERATE_STATIC_LIBRARIES=ON)
 	set(PHYSX_CXX_FLAGS_ARGS "")
 	set(PHYSX_C_FLAGS_ARGS "")
