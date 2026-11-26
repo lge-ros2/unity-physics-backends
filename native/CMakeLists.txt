@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
+# PhysX is built with the static CRT on Windows (NV_USE_STATIC_WINCRT), so the plugin DLL must match.
+if (WIN32)
+	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+endif()
+
 project(PhysicsBackend LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -22,6 +27,12 @@ if (PHYSX_SDK EQUAL 4)
 	set(BACKEND_TARGET PhysX4RefBackend)
 else()
 	set(BACKEND_TARGET PhysX5Backend)
+endif()
+
+if (WIN32)
+	set(BACKEND_PLATFORM_FOLDER windows)
+else()
+	set(BACKEND_PLATFORM_FOLDER linux)
 endif()
 
 add_library(${BACKEND_TARGET} SHARED
@@ -56,10 +67,11 @@ if (PHYSX5_LINK_PHYSX)
 	target_link_libraries(${BACKEND_TARGET} PRIVATE physx_sdk_libs)
 endif()
 
-set_target_properties(${BACKEND_TARGET} PROPERTIES
-	OUTPUT_NAME ${BACKEND_TARGET}
-	PREFIX "lib"
-	SUFFIX ".so")
+if (WIN32)
+	set_target_properties(${BACKEND_TARGET} PROPERTIES OUTPUT_NAME ${BACKEND_TARGET} PREFIX "" SUFFIX ".dll")
+else()
+	set_target_properties(${BACKEND_TARGET} PROPERTIES OUTPUT_NAME ${BACKEND_TARGET} PREFIX "lib" SUFFIX ".so")
+endif()
 
 target_include_directories(${BACKEND_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # SYSTEM: keep -Wall/-Wextra noise from the vendored Unity headers out of the build.
@@ -67,18 +79,25 @@ target_include_directories(${BACKEND_TARGET} SYSTEM PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity
 	${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity/PhysicsBackend)
 
-target_compile_options(${BACKEND_TARGET} PRIVATE
-	-Wall -Wextra -fPIC -fvisibility=hidden -fvisibility-inlines-hidden -O2)
+if (MSVC)
+	# Only the Unity entry points carry UNITY_INTERFACE_EXPORT (__declspec(dllexport)); everything else stays private.
+	target_compile_options(${BACKEND_TARGET} PRIVATE /W3 /O2 /EHsc /utf-8 /permissive-)
+	target_compile_definitions(${BACKEND_TARGET} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+else()
+	target_compile_options(${BACKEND_TARGET} PRIVATE
+		-Wall -Wextra -fPIC -fvisibility=hidden -fvisibility-inlines-hidden -O2)
 
-# Statically link the C++ runtime and export only the Unity entry points.
-target_link_libraries(${BACKEND_TARGET} PRIVATE
-	-static-libstdc++ -static-libgcc
-	-Wl,--exclude-libs,ALL -Wl,-Bsymbolic
-	-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map
-	-Wl,--no-undefined)
-set_target_properties(${BACKEND_TARGET} PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/exports.map)
+	# Statically link the C++ runtime and export only the Unity entry points.
+	target_link_libraries(${BACKEND_TARGET} PRIVATE
+		-static-libstdc++ -static-libgcc
+		-Wl,--exclude-libs,ALL -Wl,-Bsymbolic
+		-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map
+		-Wl,--no-undefined)
+	set_target_properties(${BACKEND_TARGET} PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/exports.map)
+endif()
 
-if (BUILD_TESTS AND PHYSX5_LINK_PHYSX)
+# The native tests load the backend with dlopen.
+if (BUILD_TESTS AND PHYSX5_LINK_PHYSX AND NOT WIN32)
 	# Loads the backend .so with dlopen and drives it through the Unity command entry point.
 	add_executable(fall_test tests/fall_test.cpp)
 	target_include_directories(fall_test SYSTEM PRIVATE
@@ -156,12 +175,13 @@ if (BUILD_TESTS AND PHYSX5_LINK_PHYSX)
 endif()
 
 set(PHYSX5_DEFAULT_INSTALL_DIR
-	${CMAKE_CURRENT_SOURCE_DIR}/../packages/com.lge-ros2.physics-backend.physx5/Plugins~/linux)
+	${CMAKE_CURRENT_SOURCE_DIR}/../packages/com.lge-ros2.physics-backend.physx5/Plugins~/${BACKEND_PLATFORM_FOLDER})
 
+# A DLL is a RUNTIME artifact for CMake, a .so is a LIBRARY artifact.
 if (PHYSX_SDK EQUAL 5)
-	install(TARGETS ${BACKEND_TARGET} LIBRARY DESTINATION ${PHYSX5_DEFAULT_INSTALL_DIR})
+	install(TARGETS ${BACKEND_TARGET} LIBRARY DESTINATION ${PHYSX5_DEFAULT_INSTALL_DIR} RUNTIME DESTINATION ${PHYSX5_DEFAULT_INSTALL_DIR})
 endif()
 
 if (PHYSX5_DEV_INSTALL_DIR)
-	install(TARGETS ${BACKEND_TARGET} LIBRARY DESTINATION ${PHYSX5_DEV_INSTALL_DIR})
+	install(TARGETS ${BACKEND_TARGET} LIBRARY DESTINATION ${PHYSX5_DEV_INSTALL_DIR} RUNTIME DESTINATION ${PHYSX5_DEV_INSTALL_DIR})
 endif()

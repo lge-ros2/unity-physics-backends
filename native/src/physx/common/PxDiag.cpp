@@ -7,10 +7,10 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <unordered_map>
 #include <vector>
 
-#include <unistd.h>
 
 // Opt-in diagnostics (env BACKEND_DIAG=1): dumps every articulation once its structure has settled, then reports
 // links that move implausibly fast. Meant for chasing instability that only shows up in real scenes.
@@ -31,7 +31,8 @@ namespace backend::pxw
 		bool Enabled()
 		{
 			static const bool env = std::getenv("BACKEND_DIAG") != nullptr;
-			return env || access("BACKEND_DIAG", F_OK) == 0;
+			std::error_code ec;
+			return env || std::filesystem::exists("BACKEND_DIAG", ec);
 		}
 
 		const char* MotionName(artic::Motion m)

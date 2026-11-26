@@ -15,8 +15,12 @@ namespace backend
 
 	// Logging through IUnityLog (silently ignored while no interface is set).
 	void SetLogInterface(IUnityLog* log);
+#if defined(__GNUC__)
 	void LogFormatted(UnityLogType type, const char* file, int line, const char* fmt, ...)
 		__attribute__((format(printf, 4, 5)));
+#else
+	void LogFormatted(UnityLogType type, const char* file, int line, const char* fmt, ...);
+#endif
 
 #define BACKEND_LOGF(...) ::backend::LogFormatted(kUnityLogTypeLog, __FILE__, __LINE__, __VA_ARGS__)
 #define BACKEND_WARNF(...) ::backend::LogFormatted(kUnityLogTypeWarning, __FILE__, __LINE__, __VA_ARGS__)
